@@ -1,0 +1,83 @@
+# Per-game table rules.
+poker:
+  # Blocks from the placed deck. Leaving this range returns cards and calls Game.onLeave.
+  leave-distance: 6
+  # Named set from cards.yml. Poker does not deal jokers even if french_54 gains them later.
+  card-set: french_52
+  label: Poker
+  # TLibs IA path for the game-select GUI icon.
+  icon: ia.tfmc_games:oseni_1
+  # Catalog rank (cards.yml) -> sort/play value. Unlisted ranks keep the catalog number.
+  # Ace is rank 1 in the catalog; poker treats it as 14 (high).
+  rank-values:
+    1: 14
+  piles:
+    board:
+      forward: 0.55
+      right: 0
+    dealer:
+      forward: 1.10
+      right: 0
+  felt:
+    type: ring
+    min-range: 0.3
+    max-range: 1.2
+
+freeplay:
+  leave-distance: 6
+  card-set: french_52
+  label: Free play
+  icon: ia.tfmc_games:cerrith_10
+  # Ace is rank 1 in the catalog; free play sorts it as high (above king).
+  rank-values:
+    1: 14
+  piles:
+    board:
+      forward: 0.55
+      right: 0
+  felt:
+    type: ring
+    min-range: 0.3
+    max-range: 1.2
+
+blackjack:
+  leave-distance: 6
+  card-set: french_52
+  label: Blackjack
+  icon: ia.tfmc_games:mitlan_7
+  piles:
+    dealer:
+      forward: 0.5
+      right: 0.55
+    board:
+      forward: 0.55
+      right: 0
+    tray:
+      forward: 0
+      right: 1.10
+  stand:
+    forward: -0.4
+    right: -1.0
+  no-bet-radius: 0.5
+  felt:
+    type: box
+    forward: 0.9
+    right: 0
+    width: 1.8
+    depth: 0.8
+  bet-zone:
+    radius: 0.5
+  dealer-hits-soft-17: false
+  auto-dealer: true
+  min-bet: 10
+  max-bet: 1000
+  max-boxes: 6
+  bet-seconds: 10
+  result-delay-ticks: 8
+  round-end-seconds: 10
+  voice:
+    channel: rp
+    hit: Hit.
+    stand: Stand.
+    double: Double.
+    split: Split.

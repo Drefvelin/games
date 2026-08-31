@@ -1,0 +1,35 @@
+main: net.tfminecraft.games.Games
+api-version: '1.21'
+name: Games
+version: 0.1.0
+author: Drefvelin
+depend: [TLibs, ItemsAdder, ProtocolLib]
+softdepend: [DenarEconomy, RPCharacters, SimpleFactions]
+
+commands:
+  games:
+    description: Tabletop games commands
+    usage: /games <bet|reload|deck|display|place|payout>
+  wager:
+    description: Propose loot at a table or vote on a wager
+    usage: /wager <amount|accept|decline>
+    permission: games.wager
+
+permissions:
+  games.wager:
+    description: Allows /wager at a table
+    default: true
+  games.bet:
+    description: Allows /games bet at a claimed blackjack table
+    default: true
+  games.admin:
+    description: Allows /games admin commands
+    default: op
+    children:
+      games.admin.reload: true
+  games.admin.reload:
+    description: Reload Games configs
+    default: op
+  games.autodealer.staff:
+    description: Staff mint auto dealer and table options mint toggle
+    default: op

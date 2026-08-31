@@ -1,0 +1,51 @@
+package net.tfminecraft.games.game;
+
+import org.bukkit.entity.Player;
+
+import net.tfminecraft.games.Messages;
+import net.tfminecraft.games.table.Table;
+import net.tfminecraft.games.table.TableManager;
+import net.tfminecraft.games.wager.PotPile;
+
+/**
+ * Shoe, hands, and felt only. No 21, streets, or dealer.
+ */
+public final class FreePlayGame implements Game {
+
+    @Override
+    public boolean allowFreeDraw(Table table, Player player) {
+        return table != null && !table.live();
+    }
+
+    @Override
+    public boolean allowReturnSelected(Table table, Player player) {
+        return table != null && !table.live();
+    }
+
+    @Override
+    public boolean allowManualPotFlush(Table table, Player player) {
+        return table != null && !table.live();
+    }
+
+    @Override
+    public String extraLabel(Table table) {
+        if (table == null) {
+            return "";
+        }
+        int total = 0;
+        for (PotPile pile : table.getPiles()) {
+            total += pile.contribution();
+        }
+        return Messages.get("label.pot", "n", String.valueOf(total));
+    }
+
+    @Override
+    public void onFeltPilesChanged(Table table) {
+        TableManager.get().refreshLabel(table);
+    }
+
+    @Override
+    public void onChipIn(Table table, Player player) {
+        TableManager.get().refreshLabel(table);
+    }
+}

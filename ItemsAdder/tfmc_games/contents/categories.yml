@@ -1,0 +1,62 @@
+info:
+  namespace: tfmc_games
+categories:
+  tfmc_games:
+    name: "TFMC Games"
+    icon: tfmc_games:deck
+    items:
+      - tfmc_games:deck
+      - tfmc_games:card_back
+      - tfmc_games:card_base
+      - tfmc_games:cerrith_1
+      - tfmc_games:cerrith_2
+      - tfmc_games:cerrith_3
+      - tfmc_games:cerrith_4
+      - tfmc_games:cerrith_5
+      - tfmc_games:cerrith_6
+      - tfmc_games:cerrith_7
+      - tfmc_games:cerrith_8
+      - tfmc_games:cerrith_9
+      - tfmc_games:cerrith_10
+      - tfmc_games:cerrith_11
+      - tfmc_games:cerrith_12
+      - tfmc_games:cerrith_13
+      - tfmc_games:mitlan_1
+      - tfmc_games:mitlan_2
+      - tfmc_games:mitlan_3
+      - tfmc_games:mitlan_4
+      - tfmc_games:mitlan_5
+      - tfmc_games:mitlan_6
+      - tfmc_games:mitlan_7
+      - tfmc_games:mitlan_8
+      - tfmc_games:mitlan_9
+      - tfmc_games:mitlan_10
+      - tfmc_games:mitlan_11
+      - tfmc_games:mitlan_12
+      - tfmc_games:mitlan_13
+      - tfmc_games:oseni_1
+      - tfmc_games:oseni_2
+      - tfmc_games:oseni_3
+      - tfmc_games:oseni_4
+      - tfmc_games:oseni_5
+      - tfmc_games:oseni_6
+      - tfmc_games:oseni_7
+      - tfmc_games:oseni_8
+      - tfmc_games:oseni_9
+      - tfmc_games:oseni_10
+      - tfmc_games:oseni_11
+      - tfmc_games:oseni_12
+      - tfmc_games:oseni_13
+      - tfmc_games:seithr_1
+      - tfmc_games:seithr_2
+      - tfmc_games:seithr_3
+      - tfmc_games:seithr_4
+      - tfmc_games:seithr_5
+      - tfmc_games:seithr_6
+      - tfmc_games:seithr_7
+      - tfmc_games:seithr_8
+      - tfmc_games:seithr_9
+      - tfmc_games:seithr_10
+      - tfmc_games:seithr_11
+      - tfmc_games:seithr_12
+      - tfmc_games:seithr_13

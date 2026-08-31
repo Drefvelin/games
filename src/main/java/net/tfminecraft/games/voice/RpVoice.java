@@ -1,0 +1,66 @@
+package net.tfminecraft.games.voice;
+
+import org.bukkit.Bukkit;
+import org.bukkit.entity.Player;
+import org.bukkit.plugin.Plugin;
+
+import net.tfminecraft.RPCharacters.Loaders.ChatLoader;
+import net.tfminecraft.RPCharacters.Managers.PlayerManager;
+import net.tfminecraft.RPCharacters.Objects.PlayerData;
+import net.tfminecraft.RPCharacters.chat.ChatChannel;
+import net.tfminecraft.RPCharacters.chat.ChatManager;
+import net.tfminecraft.games.Games;
+import net.tfminecraft.games.layout.TableLayout;
+import net.tfminecraft.games.layout.TableLayout.VoiceLines;
+
+/**
+ * RPCharacters chat without {@code /rp}. Isolated so BlackjackGame does not import RPC.
+ */
+public final class RpVoice {
+
+    private static boolean loggedFail;
+
+    private RpVoice() {}
+
+    public static void say(Player player, TableLayout layout, String key) {
+        if (player == null || layout == null || key == null || key.isBlank()) {
+            return;
+        }
+        VoiceLines voice = layout.voice();
+        if (voice == null) {
+            return;
+        }
+        String line = voice.line(key);
+        if (line == null || line.isBlank()) {
+            return;
+        }
+        String channelId = voice.channel();
+        if (channelId == null || channelId.isBlank()) {
+            return;
+        }
+        Plugin rpc = Bukkit.getPluginManager().getPlugin("RPCharacters");
+        if (rpc == null || !rpc.isEnabled()) {
+            return;
+        }
+        try {
+            speak(player, channelId, line);
+        } catch (RuntimeException | LinkageError ex) {
+            if (!loggedFail && Games.plugin != null) {
+                loggedFail = true;
+                Games.plugin.getLogger().warning("[Games] RPCharacters voice skipped: " + ex.getMessage());
+            }
+        }
+    }
+
+    private static void speak(Player player, String channelId, String line) {
+        ChatChannel channel = ChatLoader.getChannel(channelId);
+        if (channel == null) {
+            return;
+        }
+        PlayerData data = PlayerManager.get(player);
+        if (data == null || data.getActiveCharacter() == null) {
+            return;
+        }
+        ChatManager.dispatch(player, channel, line, true);
+    }
+}

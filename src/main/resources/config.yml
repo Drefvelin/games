@@ -1,0 +1,127 @@
+debug: false
+
+# Max ItemDisplays used to draw the face-down shoe. Remaining cards map onto this many layers.
+stack-visible-max: 10
+
+# ItemDisplay scale for playing cards (table size; GROUND item transform is not used).
+card-scale: 0.35
+
+# Display interpolation duration when sliding a card. 0 is instant.
+interpolation-ticks: 6
+
+# Extra Y on table-top poses (blocks), so cards sit on the surface instead of in the block.
+table-y-offset: 0.02
+
+# How far a player can be from a token origin and still receive packet displays.
+display-range: 48
+
+# Vertical gap between face-down stack layers (blocks).
+stack-layer-gap: 0.012
+
+# Face-down discard pile to the right of the shoe (blocks). Recycle slides it onto the shoe.
+table:
+  discard-offset: 0.35
+  recycle-ticks: 8
+  board-offset: 0.55
+
+# Card rotation baked into left_rotation (entity spawn yaw/pitch stay at 0).
+# yaw-offset: fine-tune card facing relative to table direction (degrees).
+# pitch: -90 flattens the card face-up on the table. roll: in-plane twist.
+table-card:
+  yaw-offset: 0
+  pitch: -90
+  roll: 0
+
+# Fan in front of the player. Look yaw is clamped to ±yaw-limit of the shoe.
+hand:
+  distance: 0.5
+  spread: 0.2
+  lift: 1.2
+  layer-gap: 0.01
+  follow-ticks: 1
+  yaw-limit: 60
+  yaw-stick: 30
+  selected-distance: 0.7
+  # How long a select/deselect push takes (ticks). Follow is paused so it does not snap.
+  select-ticks: 10
+  # Max along the look ray (own fan, not across the table).
+  select-range: 1.2
+  # How close the ray must pass to a card (blocks).
+  select-radius: 0.1
+  # How far you must walk (XZ) before the fan slides.
+  pos-stick: 0.25
+  # When mounted, first solid toward the shoe within this range (chair next to table).
+  sit-range: 1.5
+  # From table-block center toward the player (near rim).
+  sit-edge: 0.45
+  # Onto the table from that rim (selected adds selected-distance minus distance).
+  sit-inset: 0.12
+  # Ticks between each card in an F-key reveal/hide.
+  reveal-stagger: 4
+  # Ticks for the 180 sandwich flip.
+  reveal-flip: 8
+  # Shoe-to-hand and hand-to-shoe flight (public card back). 0 is instant.
+  deal-ticks: 10
+  # How far past each card (away from you, along the card facing) the dust sits.
+  reveal-dust: 0.3
+
+# Played on select, inspect, draw, and return. Empty name disables the sound.
+card-sound:
+  name: ITEM_BOOK_PAGE_TURN
+  volume: 1.0
+  pitch: 1.0
+
+# Played on chip place and pile flush. Empty name disables the sound.
+chip-sound:
+  name: ENTITY_EXPERIENCE_ORB_PICKUP
+  volume: 1.0
+  pitch: 1.0
+
+# Table pot (chips). Pouch cash-out is /deco toitem, not this plugin.
+wager:
+  # Felt ring around the shoe (blocks). Place uses look hit, not where you stand.
+  min-range: 0.3
+  max-range: 1.2
+  integer-denars: true
+  # Defaults for loot and chips that have no override.
+  stack-max: 6
+  stack-unit: 64
+  layer-gap: 0.02
+  item-scale: 0.35
+  # Vertical shift for pot ItemDisplays (blocks). Negative sits lower. Per-item override on gold/silver/items.
+  y-offset: 0
+  random-yaw: false
+  # How close a click must be to add onto an existing pile of the same type.
+  merge-range: 0.1
+  vote-seconds: 30
+  # After loot is accepted, seconds to click the felt with the same item.
+  place-seconds: 10
+  payout-ticks: 10
+  # Loot /wager <n>: 1 auto-accepts if nobody else has bought in.
+  min-players: 1
+  gold:
+    # Same flatten as cards (pitch -90). 3d: true adds another -90.
+    item: ia.tfmc:gold_coin
+    model: ia.tfmc:gold_coin
+    stack-max: 6
+    layer-gap: 0.012
+    scale: 0.45
+    pitch: -90
+    3d: true
+    y-offset: -0.2
+    random-yaw: true
+  silver:
+    item: m.currency.silver_coin
+  # Regular items. Nickname is not the match path; set item to a TLibs path.
+  # Optional look keys are the same as wager.gold (model, stack-max, layer-gap, scale, pitch, 3d, random-yaw).
+  items:
+    gold:
+      item: v.gold_ingot
+      value: 1
+      # model: ia.tfmc:gold_coin
+      # stack-max: 6
+      # layer-gap: 0.012
+      # scale: 0.45
+      # pitch: -90
+      # 3d: true
+      # random-yaw: true

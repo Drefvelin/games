@@ -1,0 +1,376 @@
+# Card catalog and named compositions.
+# Ace is rank 1 (texture from source _14). Suits are TFMC elements.
+# french_54 matches french_52 until joker textures exist.
+
+cards:
+  cerrith_1:
+    suit: cerrith
+    rank: 1
+    joker: false
+    item: ia.tfmc_games:cerrith_1
+  cerrith_2:
+    suit: cerrith
+    rank: 2
+    joker: false
+    item: ia.tfmc_games:cerrith_2
+  cerrith_3:
+    suit: cerrith
+    rank: 3
+    joker: false
+    item: ia.tfmc_games:cerrith_3
+  cerrith_4:
+    suit: cerrith
+    rank: 4
+    joker: false
+    item: ia.tfmc_games:cerrith_4
+  cerrith_5:
+    suit: cerrith
+    rank: 5
+    joker: false
+    item: ia.tfmc_games:cerrith_5
+  cerrith_6:
+    suit: cerrith
+    rank: 6
+    joker: false
+    item: ia.tfmc_games:cerrith_6
+  cerrith_7:
+    suit: cerrith
+    rank: 7
+    joker: false
+    item: ia.tfmc_games:cerrith_7
+  cerrith_8:
+    suit: cerrith
+    rank: 8
+    joker: false
+    item: ia.tfmc_games:cerrith_8
+  cerrith_9:
+    suit: cerrith
+    rank: 9
+    joker: false
+    item: ia.tfmc_games:cerrith_9
+  cerrith_10:
+    suit: cerrith
+    rank: 10
+    joker: false
+    item: ia.tfmc_games:cerrith_10
+  cerrith_11:
+    suit: cerrith
+    rank: 11
+    joker: false
+    item: ia.tfmc_games:cerrith_11
+  cerrith_12:
+    suit: cerrith
+    rank: 12
+    joker: false
+    item: ia.tfmc_games:cerrith_12
+  cerrith_13:
+    suit: cerrith
+    rank: 13
+    joker: false
+    item: ia.tfmc_games:cerrith_13
+  mitlan_1:
+    suit: mitlan
+    rank: 1
+    joker: false
+    item: ia.tfmc_games:mitlan_1
+  mitlan_2:
+    suit: mitlan
+    rank: 2
+    joker: false
+    item: ia.tfmc_games:mitlan_2
+  mitlan_3:
+    suit: mitlan
+    rank: 3
+    joker: false
+    item: ia.tfmc_games:mitlan_3
+  mitlan_4:
+    suit: mitlan
+    rank: 4
+    joker: false
+    item: ia.tfmc_games:mitlan_4
+  mitlan_5:
+    suit: mitlan
+    rank: 5
+    joker: false
+    item: ia.tfmc_games:mitlan_5
+  mitlan_6:
+    suit: mitlan
+    rank: 6
+    joker: false
+    item: ia.tfmc_games:mitlan_6
+  mitlan_7:
+    suit: mitlan
+    rank: 7
+    joker: false
+    item: ia.tfmc_games:mitlan_7
+  mitlan_8:
+    suit: mitlan
+    rank: 8
+    joker: false
+    item: ia.tfmc_games:mitlan_8
+  mitlan_9:
+    suit: mitlan
+    rank: 9
+    joker: false
+    item: ia.tfmc_games:mitlan_9
+  mitlan_10:
+    suit: mitlan
+    rank: 10
+    joker: false
+    item: ia.tfmc_games:mitlan_10
+  mitlan_11:
+    suit: mitlan
+    rank: 11
+    joker: false
+    item: ia.tfmc_games:mitlan_11
+  mitlan_12:
+    suit: mitlan
+    rank: 12
+    joker: false
+    item: ia.tfmc_games:mitlan_12
+  mitlan_13:
+    suit: mitlan
+    rank: 13
+    joker: false
+    item: ia.tfmc_games:mitlan_13
+  oseni_1:
+    suit: oseni
+    rank: 1
+    joker: false
+    item: ia.tfmc_games:oseni_1
+  oseni_2:
+    suit: oseni
+    rank: 2
+    joker: false
+    item: ia.tfmc_games:oseni_2
+  oseni_3:
+    suit: oseni
+    rank: 3
+    joker: false
+    item: ia.tfmc_games:oseni_3
+  oseni_4:
+    suit: oseni
+    rank: 4
+    joker: false
+    item: ia.tfmc_games:oseni_4
+  oseni_5:
+    suit: oseni
+    rank: 5
+    joker: false
+    item: ia.tfmc_games:oseni_5
+  oseni_6:
+    suit: oseni
+    rank: 6
+    joker: false
+    item: ia.tfmc_games:oseni_6
+  oseni_7:
+    suit: oseni
+    rank: 7
+    joker: false
+    item: ia.tfmc_games:oseni_7
+  oseni_8:
+    suit: oseni
+    rank: 8
+    joker: false
+    item: ia.tfmc_games:oseni_8
+  oseni_9:
+    suit: oseni
+    rank: 9
+    joker: false
+    item: ia.tfmc_games:oseni_9
+  oseni_10:
+    suit: oseni
+    rank: 10
+    joker: false
+    item: ia.tfmc_games:oseni_10
+  oseni_11:
+    suit: oseni
+    rank: 11
+    joker: false
+    item: ia.tfmc_games:oseni_11
+  oseni_12:
+    suit: oseni
+    rank: 12
+    joker: false
+    item: ia.tfmc_games:oseni_12
+  oseni_13:
+    suit: oseni
+    rank: 13
+    joker: false
+    item: ia.tfmc_games:oseni_13
+  seithr_1:
+    suit: seithr
+    rank: 1
+    joker: false
+    item: ia.tfmc_games:seithr_1
+  seithr_2:
+    suit: seithr
+    rank: 2
+    joker: false
+    item: ia.tfmc_games:seithr_2
+  seithr_3:
+    suit: seithr
+    rank: 3
+    joker: false
+    item: ia.tfmc_games:seithr_3
+  seithr_4:
+    suit: seithr
+    rank: 4
+    joker: false
+    item: ia.tfmc_games:seithr_4
+  seithr_5:
+    suit: seithr
+    rank: 5
+    joker: false
+    item: ia.tfmc_games:seithr_5
+  seithr_6:
+    suit: seithr
+    rank: 6
+    joker: false
+    item: ia.tfmc_games:seithr_6
+  seithr_7:
+    suit: seithr
+    rank: 7
+    joker: false
+    item: ia.tfmc_games:seithr_7
+  seithr_8:
+    suit: seithr
+    rank: 8
+    joker: false
+    item: ia.tfmc_games:seithr_8
+  seithr_9:
+    suit: seithr
+    rank: 9
+    joker: false
+    item: ia.tfmc_games:seithr_9
+  seithr_10:
+    suit: seithr
+    rank: 10
+    joker: false
+    item: ia.tfmc_games:seithr_10
+  seithr_11:
+    suit: seithr
+    rank: 11
+    joker: false
+    item: ia.tfmc_games:seithr_11
+  seithr_12:
+    suit: seithr
+    rank: 12
+    joker: false
+    item: ia.tfmc_games:seithr_12
+  seithr_13:
+    suit: seithr
+    rank: 13
+    joker: false
+    item: ia.tfmc_games:seithr_13
+
+back: ia.tfmc_games:card_back
+deck-item: ia.tfmc_games:deck
+
+sets:
+  french_54:
+    - cerrith_1
+    - cerrith_2
+    - cerrith_3
+    - cerrith_4
+    - cerrith_5
+    - cerrith_6
+    - cerrith_7
+    - cerrith_8
+    - cerrith_9
+    - cerrith_10
+    - cerrith_11
+    - cerrith_12
+    - cerrith_13
+    - mitlan_1
+    - mitlan_2
+    - mitlan_3
+    - mitlan_4
+    - mitlan_5
+    - mitlan_6
+    - mitlan_7
+    - mitlan_8
+    - mitlan_9
+    - mitlan_10
+    - mitlan_11
+    - mitlan_12
+    - mitlan_13
+    - oseni_1
+    - oseni_2
+    - oseni_3
+    - oseni_4
+    - oseni_5
+    - oseni_6
+    - oseni_7
+    - oseni_8
+    - oseni_9
+    - oseni_10
+    - oseni_11
+    - oseni_12
+    - oseni_13
+    - seithr_1
+    - seithr_2
+    - seithr_3
+    - seithr_4
+    - seithr_5
+    - seithr_6
+    - seithr_7
+    - seithr_8
+    - seithr_9
+    - seithr_10
+    - seithr_11
+    - seithr_12
+    - seithr_13
+  french_52:
+    - cerrith_1
+    - cerrith_2
+    - cerrith_3
+    - cerrith_4
+    - cerrith_5
+    - cerrith_6
+    - cerrith_7
+    - cerrith_8
+    - cerrith_9
+    - cerrith_10
+    - cerrith_11
+    - cerrith_12
+    - cerrith_13
+    - mitlan_1
+    - mitlan_2
+    - mitlan_3
+    - mitlan_4
+    - mitlan_5
+    - mitlan_6
+    - mitlan_7
+    - mitlan_8
+    - mitlan_9
+    - mitlan_10
+    - mitlan_11
+    - mitlan_12
+    - mitlan_13
+    - oseni_1
+    - oseni_2
+    - oseni_3
+    - oseni_4
+    - oseni_5
+    - oseni_6
+    - oseni_7
+    - oseni_8
+    - oseni_9
+    - oseni_10
+    - oseni_11
+    - oseni_12
+    - oseni_13
+    - seithr_1
+    - seithr_2
+    - seithr_3
+    - seithr_4
+    - seithr_5
+    - seithr_6
+    - seithr_7
+    - seithr_8
+    - seithr_9
+    - seithr_10
+    - seithr_11
+    - seithr_12
+    - seithr_13

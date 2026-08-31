@@ -1,0 +1,388 @@
+info:
+  namespace: tfmc_games
+items:
+  deck:
+    display_name: "Deck of Cards"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/deck
+  card_back:
+    display_name: "Card Back"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/card_back
+  card_base:
+    display_name: "Card Base"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/card_base
+  cerrith_1:
+    display_name: "Cerrith Ace"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/cerrith_1
+  cerrith_2:
+    display_name: "Cerrith 2"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/cerrith_2
+  cerrith_3:
+    display_name: "Cerrith 3"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/cerrith_3
+  cerrith_4:
+    display_name: "Cerrith 4"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/cerrith_4
+  cerrith_5:
+    display_name: "Cerrith 5"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/cerrith_5
+  cerrith_6:
+    display_name: "Cerrith 6"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/cerrith_6
+  cerrith_7:
+    display_name: "Cerrith 7"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/cerrith_7
+  cerrith_8:
+    display_name: "Cerrith 8"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/cerrith_8
+  cerrith_9:
+    display_name: "Cerrith 9"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/cerrith_9
+  cerrith_10:
+    display_name: "Cerrith 10"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/cerrith_10
+  cerrith_11:
+    display_name: "Cerrith Jack"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/cerrith_11
+  cerrith_12:
+    display_name: "Cerrith Queen"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/cerrith_12
+  cerrith_13:
+    display_name: "Cerrith King"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/cerrith_13
+  mitlan_1:
+    display_name: "Mitlan Ace"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/mitlan_1
+  mitlan_2:
+    display_name: "Mitlan 2"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/mitlan_2
+  mitlan_3:
+    display_name: "Mitlan 3"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/mitlan_3
+  mitlan_4:
+    display_name: "Mitlan 4"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/mitlan_4
+  mitlan_5:
+    display_name: "Mitlan 5"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/mitlan_5
+  mitlan_6:
+    display_name: "Mitlan 6"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/mitlan_6
+  mitlan_7:
+    display_name: "Mitlan 7"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/mitlan_7
+  mitlan_8:
+    display_name: "Mitlan 8"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/mitlan_8
+  mitlan_9:
+    display_name: "Mitlan 9"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/mitlan_9
+  mitlan_10:
+    display_name: "Mitlan 10"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/mitlan_10
+  mitlan_11:
+    display_name: "Mitlan Jack"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/mitlan_11
+  mitlan_12:
+    display_name: "Mitlan Queen"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/mitlan_12
+  mitlan_13:
+    display_name: "Mitlan King"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/mitlan_13
+  oseni_1:
+    display_name: "Oseni Ace"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/oseni_1
+  oseni_2:
+    display_name: "Oseni 2"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/oseni_2
+  oseni_3:
+    display_name: "Oseni 3"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/oseni_3
+  oseni_4:
+    display_name: "Oseni 4"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/oseni_4
+  oseni_5:
+    display_name: "Oseni 5"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/oseni_5
+  oseni_6:
+    display_name: "Oseni 6"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/oseni_6
+  oseni_7:
+    display_name: "Oseni 7"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/oseni_7
+  oseni_8:
+    display_name: "Oseni 8"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/oseni_8
+  oseni_9:
+    display_name: "Oseni 9"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/oseni_9
+  oseni_10:
+    display_name: "Oseni 10"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/oseni_10
+  oseni_11:
+    display_name: "Oseni Jack"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/oseni_11
+  oseni_12:
+    display_name: "Oseni Queen"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/oseni_12
+  oseni_13:
+    display_name: "Oseni King"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/oseni_13
+  seithr_1:
+    display_name: "Seithr Ace"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/seithr_1
+  seithr_2:
+    display_name: "Seithr 2"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/seithr_2
+  seithr_3:
+    display_name: "Seithr 3"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/seithr_3
+  seithr_4:
+    display_name: "Seithr 4"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/seithr_4
+  seithr_5:
+    display_name: "Seithr 5"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/seithr_5
+  seithr_6:
+    display_name: "Seithr 6"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/seithr_6
+  seithr_7:
+    display_name: "Seithr 7"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/seithr_7
+  seithr_8:
+    display_name: "Seithr 8"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/seithr_8
+  seithr_9:
+    display_name: "Seithr 9"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/seithr_9
+  seithr_10:
+    display_name: "Seithr 10"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/seithr_10
+  seithr_11:
+    display_name: "Seithr Jack"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/seithr_11
+  seithr_12:
+    display_name: "Seithr Queen"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/seithr_12
+  seithr_13:
+    display_name: "Seithr King"
+    resource:
+      material: PAPER
+      generate: true
+      textures:
+      - item/cards/seithr_13
