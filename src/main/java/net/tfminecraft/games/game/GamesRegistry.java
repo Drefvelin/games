@@ -8,6 +8,7 @@ import java.util.Locale;
 public final class GamesRegistry {
 
     private static final Game POKER = new PokerGame();
+    private static final Game DRAW = new DrawGame();
     private static final Game BLACKJACK = new BlackjackGame();
     private static final Game FREEPLAY = new FreePlayGame();
 
@@ -19,6 +20,9 @@ public final class GamesRegistry {
         }
         if ("poker".equals(gameId.toLowerCase(Locale.ROOT))) {
             return POKER;
+        }
+        if ("draw".equals(gameId.toLowerCase(Locale.ROOT))) {
+            return DRAW;
         }
         if ("blackjack".equals(gameId.toLowerCase(Locale.ROOT))) {
             return BLACKJACK;

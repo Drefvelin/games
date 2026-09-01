@@ -70,6 +70,8 @@ public final class TableLayout {
     private final int roundEndSeconds;
     private final SoundFx chipFx;
     private final int maxBoxes;
+    private final int smallBlind;
+    private final int bigBlind;
 
     public TableLayout(String cardSet, String label, String icon, double leaveDistance,
             Map<String, PileSlot> piles, FeltRing ring, FeltBox box, PileSlot stand, double noBetRadius) {
@@ -119,6 +121,16 @@ public final class TableLayout {
             boolean dealerHitsSoft17, boolean autoDealer, int minBet, int maxBet, int betSeconds,
             VoiceLines voice, BetZone betZone, int resultDelayTicks, int roundEndSeconds, SoundFx chipFx,
             int maxBoxes) {
+        this(cardSet, label, icon, leaveDistance, piles, ring, box, stand, noBetRadius, dealerHitsSoft17,
+                autoDealer, minBet, maxBet, betSeconds, voice, betZone, resultDelayTicks, roundEndSeconds, chipFx,
+                maxBoxes, 0, 0);
+    }
+
+    public TableLayout(String cardSet, String label, String icon, double leaveDistance,
+            Map<String, PileSlot> piles, FeltRing ring, FeltBox box, PileSlot stand, double noBetRadius,
+            boolean dealerHitsSoft17, boolean autoDealer, int minBet, int maxBet, int betSeconds,
+            VoiceLines voice, BetZone betZone, int resultDelayTicks, int roundEndSeconds, SoundFx chipFx,
+            int maxBoxes, int smallBlind, int bigBlind) {
         this.cardSet = cardSet;
         this.label = label;
         this.icon = icon;
@@ -139,6 +151,8 @@ public final class TableLayout {
         this.roundEndSeconds = Math.max(1, roundEndSeconds);
         this.chipFx = chipFx;
         this.maxBoxes = Math.max(0, maxBoxes);
+        this.smallBlind = smallBlind > 0 ? Math.max(1, smallBlind) : 0;
+        this.bigBlind = bigBlind > 0 ? Math.max(1, bigBlind) : 0;
     }
 
     public String cardSet() {
@@ -220,6 +234,16 @@ public final class TableLayout {
     /** 0 means no cap. */
     public int maxBoxes() {
         return maxBoxes;
+    }
+
+    /** 0 means no blinds line. */
+    public int smallBlind() {
+        return smallBlind;
+    }
+
+    /** 0 means no blinds line. */
+    public int bigBlind() {
+        return bigBlind;
     }
 
     public Location standLocation(Table table) {

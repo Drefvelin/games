@@ -9,6 +9,7 @@ import me.Plugins.SimpleFactions.Managers.FactionManager;
 import me.Plugins.SimpleFactions.Objects.Bank;
 import me.Plugins.SimpleFactions.enums.GuildModifier;
 import net.tfminecraft.games.Games;
+import net.tfminecraft.games.Messages;
 import net.tfminecraft.games.table.Table;
 import net.tfminecraft.games.table.TableHouse;
 import net.tfminecraft.games.table.TableManager;
@@ -23,12 +24,12 @@ public final class GuildTables {
     private GuildTables() {}
 
     public static boolean counts(Table table) {
-        return table != null && table.autoDealer() && !table.staffMint()
+        return table != null && !table.staffMint()
                 && table.ownerGuildId() != null && !table.ownerGuildId().isBlank();
     }
 
     public static boolean wouldCount(TableHouse house) {
-        return house != null && house.autoDealer() && !house.staffMint();
+        return house != null && !house.staffMint();
     }
 
     public static String guildId(Player player) {
@@ -45,6 +46,23 @@ public final class GuildTables {
             }
             String id = guild.getId();
             return id == null || id.isBlank() ? null : id;
+        } catch (RuntimeException | LinkageError ex) {
+            warn(ex);
+            return null;
+        }
+    }
+
+    public static String displayName(String guildId) {
+        if (guildId == null || guildId.isBlank()) {
+            return null;
+        }
+        try {
+            Guild guild = guild(guildId);
+            if (guild == null) {
+                return null;
+            }
+            String name = guild.getName();
+            return name == null || name.isBlank() ? null : name;
         } catch (RuntimeException | LinkageError ex) {
             warn(ex);
             return null;
@@ -106,10 +124,10 @@ public final class GuildTables {
      * Null if this house may be saved/placed. Otherwise a messages.yml key.
      */
     public static String refuseKey(Player player, TableHouse house, Table existing) {
-        if (!wouldCount(house)) {
+        if (house != null && house.staffMint()) {
             return null;
         }
-        if (existing != null && counts(existing)) {
+        if (!wouldCount(house)) {
             return null;
         }
         String id = house.ownerGuildId();
@@ -120,14 +138,34 @@ public final class GuildTables {
         if (id == null || id.isBlank()) {
             return "place.no_guild";
         }
+        if (!isLeader(id, player)) {
+            return "place.not_leader";
+        }
+        if (existing != null && counts(existing)) {
+            return null;
+        }
         if (!canAddGuildAuto(id)) {
             return "place.no_slots";
         }
         return null;
     }
 
+    public static void tellRefuse(Player player, String key, TableHouse house) {
+        if (player == null || key == null || key.isBlank()) {
+            return;
+        }
+        if ("place.no_slots".equals(key)) {
+            String id = house != null ? house.ownerGuildId() : null;
+            player.sendMessage(Messages.get(key,
+                    "used", String.valueOf(count(id)),
+                    "cap", String.valueOf(cap(id))));
+            return;
+        }
+        player.sendMessage(Messages.get(key));
+    }
+
     public static void stampGuild(Player player, TableHouse house) {
-        if (house == null) {
+        if (house == null || house.staffMint()) {
             return;
         }
         if (house.ownerGuildId() == null || house.ownerGuildId().isBlank()) {
@@ -159,6 +197,20 @@ public final class GuildTables {
         }
     }
 
+    private static boolean isLeader(String guildId, Player player) {
+        try {
+            Guild guild = guild(guildId);
+            if (guild == null || player == null) {
+                return false;
+            }
+            String leader = guild.getLeader();
+            return leader != null && leader.equalsIgnoreCase(player.getName());
+        } catch (RuntimeException | LinkageError ex) {
+            warn(ex);
+            return false;
+        }
+    }
+
     public static boolean tryWithdraw(String guildId, int denars) {
         if (denars < 1) {
             return true;
@@ -180,23 +232,41 @@ public final class GuildTables {
         }
     }
 
-    public static void deposit(String guildId, int denars) {
+    public static boolean guildExists(String guildId) {
+        try {
+            return guild(guildId) != null;
+        } catch (RuntimeException | LinkageError ex) {
+            warn(ex);
+            return false;
+        }
+    }
+
+    /**
+     * True if the amount was banked (or there was nothing to bank). False if the guild or bank is gone.
+     */
+    public static boolean tryDeposit(String guildId, int denars) {
         if (denars < 1) {
-            return;
+            return true;
         }
         try {
             Guild guild = guild(guildId);
             if (guild == null) {
-                return;
+                return false;
             }
             Bank bank = guild.getBank();
             if (bank == null) {
-                return;
+                return false;
             }
             bank.deposit((double) denars);
+            return true;
         } catch (RuntimeException | LinkageError ex) {
             warn(ex);
+            return false;
         }
+    }
+
+    public static void deposit(String guildId, int denars) {
+        tryDeposit(guildId, denars);
     }
 
     private static Guild guild(String guildId) {

@@ -339,6 +339,12 @@ public final class BlackjackGame implements Game {
                 WorldAnchors.remove(id);
             }
         }
+    }
+
+    private void clearTrayHolo(Table table) {
+        if (table == null) {
+            return;
+        }
         WorldAnchors.remove(trayHolos.remove(table.getId()));
     }
 
@@ -378,6 +384,7 @@ public final class BlackjackGame implements Game {
         cancelBetTimer(table);
         cancelLinger(table);
         clearPileHolos(table);
+        clearTrayHolo(table);
     }
 
     @Override
@@ -386,6 +393,7 @@ public final class BlackjackGame implements Game {
         cancelBetTimer(table);
         clearPileHolos(table);
         prepareIdle(table);
+        syncTrayHolo(table);
     }
 
     @Override
@@ -625,11 +633,13 @@ public final class BlackjackGame implements Game {
             table.setBetOpen(false);
             table.setAutoCountdown(0);
             TableManager.get().refreshLabel(table);
+            syncTrayHolo(table);
             return;
         }
         table.setBetOpen(true);
         table.setAutoCountdown(0);
         TableManager.get().refreshLabel(table);
+        syncTrayHolo(table);
     }
 
     private void startBetTimer(Table table) {

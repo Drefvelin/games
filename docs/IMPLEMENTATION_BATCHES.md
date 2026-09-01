@@ -2,6 +2,8 @@
 
 Work in order. Each batch should compile and be testable before the next.
 
+**Games (conceptually done):** blackjack is playable. Tenceur Hold'em (`poker`) and Five-Draw (`draw`) have all numbered batches checked; both still need in-game testing. Shuffle GUI for Five-Draw, Hold'em blind posting, burns, jacks-or-better, and ante stay later unless a lock says otherwise. Tables persist location and house settings; shutdown/crash boot resets each table to idle (no mid-hand resume).
+
 See [SYSTEM.md](SYSTEM.md) for engines vs poker and packet ItemDisplay rules.
 See [TEST_MATRIX.md](TEST_MATRIX.md) for the manual checklist (filled as batches land).
 
@@ -334,3 +336,132 @@ New set. Lock: [GUILD_TABLES.md](GUILD_TABLES.md). Phase 2 blackjack stay done. 
 | Seat furniture / sit binding |
 
 Do not start a later batch while the previous is untested.
+
+---
+
+## Phase 3 - Hold'em
+
+Lock: [HOLDEM.md](HOLDEM.md). Blackjack and guild house stay done. Engines stay dumb. Grow `PokerGame` only.
+
+### Batch 1 - Seats, button, blinds
+
+- [x] `poker.blinds.small` / `big` in `games.yml`; hologram `label.blinds` / `label.button`
+- [x] Chip-in seats (`actives` insertion order). First seated player is the button (`dealerId`)
+- [x] Button passes to the next seated player on leave or logout
+- [x] No deal, no posting, `minActives` 0, idle shoe still draws
+
+**Test:** Two chip-ins: first is Button. First leaves: button moves. Last leaves: no button line. Sandbox draw still works.
+
+### Batch 2 - Hole cards and live lock
+
+- [x] Seated shoe click with 2+ `actives` starts a session (idle click not consumed if fewer or unseated)
+- [x] Deal one around then one around, left of the button first; `ROUND` reshuffle at start
+- [x] Live: no free draw / selected return; F still works; session stop mucks holes, no button rotate
+- [x] Live leave to fewer than 2 seated ends the session
+
+**Test:** Two seats, click shoe: two hole cards each. One player: still draws. Stop: muck, idle draw. One walks: session ends.
+
+### Batch 3 - Preflop betting
+
+- [x] Chat `check` / `call` / `fold` / `raise` via play words; `Game.allowPlayChat` / `onPlayWord` (no `if poker` in TableManager)
+- [x] Street `currentBet`, folded, acted; contrib is this-street owned piles; actor left of button after the hole deal
+- [x] Fold-win: muck holes, `endSession`, `passButton`; all matched: actor null, `poker.street_done`; no flop, no blinds posted
+- [x] Label turn + `label.holdem_tocall`; copy keys in `messages.yml`
+
+**Test:** Two check: street done, live, no board. Raise then short call: need chips. Fold: win, button moves. Not-actor chat ignored.
+
+### Batch 4 - Flop, turn, river
+
+- [x] Street match auto-deals flop 3 / turn 1 / river 1 face-up via `dealToTable` `board`; bump `table.street()` before the deal
+- [x] Keep `folded`; reset `currentBet` / `acted`; actor left of button (skip folded)
+- [x] After river match: actor null, still live, no showdown, no burns, no blinds posted
+- [x] Label `holdem_flop` / `holdem_turn` / `holdem_river`; copy `poker.flop` / `turn` / `river`
+
+**Test:** Two check: flop 3. Check around to river: 5 cards, street done, live. Fold on flop: win, button moves. Flop call needs this-street chips only.
+
+### Batch 5 - Showdown even pots
+
+- [x] River match auto-showdown: `publishHand`, rank in `HoldemRank` (not on `Card`), ace-high + wheel
+- [x] Even denar split; leftover 1s left of the button among winners; leftover unsplittable chips to first of those
+- [x] `flushPiles` then `endSession` + `passButton`; fold-win still skips ranking; no side pots
+- [x] `label.holdem_showdown`; `poker.showdown` / `win` / `chop`
+
+**Test:** Check to river: reveal, winner takes pot, button moves. Chop splits evenly. Fold before river: no ranking.
+
+### Batch 6 - Side pots
+
+- [x] Short **call** allowed (`capped` skip rest of street); raise still needs more than `currentBet`; no new play word
+- [x] Showdown pots by total invested; even split per layer; leftover 1s left of button among that layer’s winners
+- [x] Folded chips stay in pots; fold-win skips ranking; no blinds posted
+
+**Test:** Short call then raise: street ends, board runs. Side pot to who put more. Equal stacks: one pot. Folder does not win.
+
+### Batch 7 - Blinds GUI and shuffle
+
+- [x] Per-table `smallBlind` / `bigBlind` persist; missing JSON uses `games.yml`; hologram from table, not layout
+- [x] Poker options GUI: small, big, shuffle; place from game-select; sneak-edit for owner/staff; no guild auto refuse
+- [x] Shuffle on poker label; still no blind posting
+
+**Test:** Place 5/10 Round. Edit 0/0 hides blinds. Old tables use yaml. Non-owner sneak flushes. BJ GUI unchanged.
+
+---
+
+## Phase 4 - Five-Draw
+
+Lock: [FIVEDRAW.md](FIVEDRAW.md). Hold'em (`poker`) and blackjack stay done. Engines stay dumb. New `DrawGame` only. Saved id **`draw`**. Do not start until Phase 3 is tested.
+
+### Batch 1 - Place and seats
+
+- [x] `games.yml` `draw`: `label` Five-Draw, `icon` `ia.tfmc_games:seithr_5`, felt ring, no blinds
+- [x] `GamesRegistry`, select GUI fourth slot, `place.gui_draw`, `/games place draw`
+- [x] `DrawGame`: chip-in seats, button, idle sandbox, `minActives` 0
+- [x] Hold'em `poker.label` Tenceur Hold'em (id stays `poker`)
+
+**Test:** Place Five-Draw and Hold'em. Labels and icons distinct. Sandbox draw on idle draw table.
+
+### Batch 2 - Deal five
+
+- [x] Seated shoe click with 2+ `actives` starts a session
+- [x] Five cards each, left of button first; `ROUND` reshuffle at start
+- [x] Live: no free draw; F still works; session stop mucks, no button rotate; leave to fewer than 2 seated ends session
+
+**Test:** Two seats, click: five each. One seat: still sandbox. Stop: muck, idle draw.
+
+### Batch 3 - First betting street
+
+- [x] `allowPlayChat` / `onPlayWord` on draw bet phase (engine already has check/call/fold/raise)
+- [x] Street state in `DrawGame` (folded, acted, capped, currentBet); fold-win `passButton`
+- [x] Matched: go to draw phase, not showdown
+
+**Test:** Two check: draw phase. Fold: win, button moves. Unseated chat ignored.
+
+### Batch 4 - Draw
+
+- [x] Actor only; F / selected return discards then deal that many; `playWord` **draw** stands pat / commits
+- [x] Next live seat; all drawn: street 2 reset, actor left of button
+
+**Test:** Stand pat with `draw`. Discard two, dealt two. Folded skipped.
+
+### Batch 5 - Second street and showdown
+
+- [x] Same betting; then `publishHand`, `HoldemRank` on five cards, Hold'em-style side pots
+- [x] `endSession` + `passButton`
+
+**Test:** Check/check after draw: showdown, pot, button moves. Short call: side pot. Equal stacks: one pot.
+
+---
+
+## Phase 5 - Shutdown and boot reset
+
+No cross-session play. Tables stay in `Data/tables/`. A stop or crash boot leaves each table **idle**.
+
+### Batch 1 - Idle reset
+
+- [x] `resetTableToIdle`: muck hands and board, settle felt, clear seats, reshuffle, save
+- [x] Shutdown (`despawnWorldAll`) uses that path then despawns displays
+- [x] Boot: stale JSON (`actives` or `piles`) is reset before spawn
+- [x] Guild auto tray banks; missing guild drops tray items; staff mint tray is deleted, not dropped
+
+**Test:** Stop mid-hand: table still there, idle, full deck, no piles. Kill JVM, restart: same. Guild gone: tray drops. Staff mint: no tray items.
+
+Do not start a later Five-Draw batch while the previous is untested.

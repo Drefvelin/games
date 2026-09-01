@@ -13,13 +13,16 @@ public final class TableOptionsHolder implements InventoryHolder {
     private final boolean requireDeck;
     private final Location pendingHit;
     private final UUID editTableId;
+    private final String gameId;
     private final TableHouse house;
     private Inventory inventory;
 
-    public TableOptionsHolder(boolean requireDeck, Location pendingHit, UUID editTableId, TableHouse house) {
+    public TableOptionsHolder(boolean requireDeck, Location pendingHit, UUID editTableId, String gameId,
+            TableHouse house) {
         this.requireDeck = requireDeck;
         this.pendingHit = pendingHit != null ? pendingHit.clone() : null;
         this.editTableId = editTableId;
+        this.gameId = gameId != null ? gameId : "blackjack";
         this.house = house;
     }
 
@@ -33,6 +36,10 @@ public final class TableOptionsHolder implements InventoryHolder {
 
     public UUID editTableId() {
         return editTableId;
+    }
+
+    public String gameId() {
+        return gameId;
     }
 
     public TableHouse house() {

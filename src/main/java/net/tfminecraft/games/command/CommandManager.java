@@ -198,8 +198,8 @@ public class CommandManager implements CommandExecutor, TabCompleter {
             sender.sendMessage(Messages.get("place.players_only"));
             return true;
         }
-        if (args.length >= 2 && (args[1].equalsIgnoreCase("poker") || args[1].equalsIgnoreCase("blackjack")
-                || args[1].equalsIgnoreCase("freeplay"))) {
+        if (args.length >= 2 && (args[1].equalsIgnoreCase("poker") || args[1].equalsIgnoreCase("draw")
+                || args[1].equalsIgnoreCase("blackjack") || args[1].equalsIgnoreCase("freeplay"))) {
             if (args[1].equalsIgnoreCase("blackjack")) {
                 TableOptionsGui.openPlace(player, false, null);
                 return true;
@@ -286,7 +286,8 @@ public class CommandManager implements CommandExecutor, TabCompleter {
         }
         String action = args[1].toLowerCase(Locale.ROOT);
         if (action.equals("hit") || action.equals("stand") || action.equals("double")
-                || action.equals("split")) {
+                || action.equals("split") || action.equals("check") || action.equals("call")
+                || action.equals("fold") || action.equals("raise")) {
             return handleBetPlay(player, table, action);
         }
         if (!player.getUniqueId().equals(table.dealerId())) {
@@ -368,7 +369,7 @@ public class CommandManager implements CommandExecutor, TabCompleter {
             player.sendMessage(Messages.get("bet.need_live"));
             return true;
         }
-        if ("play".equals(table.phase()) && player.getUniqueId().equals(table.actor())) {
+        if (game.allowPlayChat(table, player)) {
             TableManager.get().applyPlayCall(player, action);
             return true;
         }
@@ -487,7 +488,8 @@ public class CommandManager implements CommandExecutor, TabCompleter {
             return prefix(first, args[0]);
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("bet") && bet) {
-            return prefix(List.of("min", "max", "open", "close", "hit", "stand", "double", "split"), args[1]);
+            return prefix(List.of("min", "max", "open", "close", "hit", "stand", "double", "split",
+                    "check", "call", "fold", "raise"), args[1]);
         }
         if (!admin) {
             return Collections.emptyList();
@@ -509,7 +511,7 @@ public class CommandManager implements CommandExecutor, TabCompleter {
             return prefix(names, args[1]);
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("place")) {
-            return prefix(List.of("poker", "blackjack", "freeplay"), args[1]);
+            return prefix(List.of("poker", "draw", "blackjack", "freeplay"), args[1]);
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("deck")) {
             return prefix(List.of("test"), args[1]);

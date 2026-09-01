@@ -2,7 +2,6 @@ package net.tfminecraft.games.table;
 
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -43,7 +42,7 @@ public final class Table {
     private Runnable payoutOnDone;
     private final List<PayoutFlight> payoutFlying = new ArrayList<>();
     private final LinkedHashSet<UUID> payoutDests = new LinkedHashSet<>();
-    private final Set<UUID> actives = new HashSet<>();
+    private final Set<UUID> actives = new LinkedHashSet<>();
     private boolean live;
     private UUID actor;
     private String phase;
@@ -61,6 +60,8 @@ public final class Table {
     private boolean staffMint;
     private int maxBoxes;
     private ShufflePolicy shufflePolicy = ShufflePolicy.SHOE;
+    private int smallBlind;
+    private int bigBlind;
 
     public Table(UUID id, String gameId, Location origin, float yaw, Deck deck) {
         this.id = id;
@@ -313,7 +314,10 @@ public final class Table {
     }
 
     public void setMinBet(int minBet) {
-        this.minBet = Math.max(0, minBet);
+        this.minBet = Math.max(1, minBet);
+        if (this.maxBet < this.minBet) {
+            this.maxBet = this.minBet;
+        }
     }
 
     public int maxBet() {
@@ -321,7 +325,7 @@ public final class Table {
     }
 
     public void setMaxBet(int maxBet) {
-        this.maxBet = Math.max(0, maxBet);
+        this.maxBet = Math.max(this.minBet, Math.max(1, maxBet));
     }
 
     public int autoCountdown() {
@@ -354,6 +358,9 @@ public final class Table {
 
     public void setAutoDealer(boolean autoDealer) {
         this.autoDealer = autoDealer;
+        if (!autoDealer) {
+            this.staffMint = false;
+        }
     }
 
     public boolean staffMint() {
@@ -362,6 +369,9 @@ public final class Table {
 
     public void setStaffMint(boolean staffMint) {
         this.staffMint = staffMint;
+        if (staffMint) {
+            this.autoDealer = true;
+        }
     }
 
     public int maxBoxes() {
@@ -378,6 +388,22 @@ public final class Table {
 
     public void setShufflePolicy(ShufflePolicy shufflePolicy) {
         this.shufflePolicy = shufflePolicy != null ? shufflePolicy : ShufflePolicy.SHOE;
+    }
+
+    public int smallBlind() {
+        return smallBlind;
+    }
+
+    public void setSmallBlind(int smallBlind) {
+        this.smallBlind = Math.max(0, smallBlind);
+    }
+
+    public int bigBlind() {
+        return bigBlind;
+    }
+
+    public void setBigBlind(int bigBlind) {
+        this.bigBlind = Math.max(0, bigBlind);
     }
 
     public void clearBetWindow() {

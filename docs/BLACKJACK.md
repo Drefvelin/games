@@ -12,7 +12,8 @@ Player-facing strings: no em dash (U+2014).
 
 There is **no shared pot**. Each player bets in a box. The house pays wins and takes losses.
 
-- **Table min / max** is the **box total**, not each click. A place is refused only if `have + this chip > max`. Building with 1-denar coins up to min is allowed. After the box is at min, 1s and 5s (any legal chip) may be added until max. A box under min at close is not a legal box (refund that felt, no deal to it). First place that brings a box to min starts the auto bet window.
+- **Table min / max** is the **box total**, not each click. A place is refused only if `have + this chip > max`. Building with 1-denar coins up to min is allowed. After the box is at min, 1s and 5s (coins only) may be added until max. A box under min at close is not a legal box (refund that felt, no deal to it). First place that brings a box to min starts the auto bet window.
+- **Bets are coins only.** DenarEconomy coins and configured gold/silver coin items. No gold ingot, no `wager.items`, no `/wager` loot.
 - **Double and split are allowed.** The dealer **cannot refuse** them. The **player** must put out an equal extra bet. If they cannot, the action fails (not a dealer no).
 - **Doubled hands pay even money**, not 3:2. Naturals (two-card 21) pay **3:2**. Usual strip limits: split pairs, double after split (DAS), doubled/split hands are not naturals.
 - **House bank is unbounded.** A player banker can lose a lot. Auto dealer covers each box bet 1:1 on the tray (same stored items) and mints any extra shortfall (naturals). Tray stacks spread around the tray centre (not one pile). A total holo sits over the tray.

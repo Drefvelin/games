@@ -70,6 +70,7 @@ import net.tfminecraft.games.display.DisplayManager;
 import net.tfminecraft.games.display.DisplayPose;
 import net.tfminecraft.games.display.WorldAnchors;
 import net.tfminecraft.games.gui.GameSelectGui;
+import net.tfminecraft.games.gui.GuiSounds;
 import net.tfminecraft.games.game.Game;
 import net.tfminecraft.games.game.GamesRegistry;
 import net.tfminecraft.games.guild.GuildTables;
@@ -97,6 +98,7 @@ public final class TableManager implements Listener {
     private static final long PLACE_TIMEOUT_MS = 30_000L;
     private static final double MIN_DISTANCE = 1.0;
     private static final double FELT_REACH = 5.0;
+    private static final double TABLE_Y_SLOP = 3.0;
     private static final double PLACE_TOP_MIN = 0.9;
 
     private static final long SELECT_COOLDOWN_MS = 200L;
@@ -247,6 +249,11 @@ public final class TableManager implements Listener {
                 }
                 tables.put(table.getId(), table);
                 try {
+                    boolean stale = (data.actives != null && !data.actives.isEmpty())
+                            || (data.piles != null && !data.piles.isEmpty());
+                    if (stale) {
+                        resetTableToIdle(table, table.getOrigin());
+                    }
                     spawnWorld(table);
                 } catch (RuntimeException ex) {
                     despawnWorld(table);
@@ -265,19 +272,40 @@ public final class TableManager implements Listener {
 
     public void despawnWorldAll() {
         for (Table table : tables.values()) {
-            cancelVote(table, null);
-            table.clearSession();
-            table.setDealerId(null);
-            Game removed = gameOf(table);
-            if (removed != null) {
-                removed.onTableRemoved(table);
-            }
-            returnGuildTray(table);
-            clearFeltNow(table, null);
-            returnAllHands(table, false, false);
+            resetTableToIdle(table, table.getOrigin());
             despawnWorld(table);
-            save(table);
         }
+    }
+
+    /**
+     * End the session, settle money, muck cards, full idle deck. Table file stays.
+     */
+    private void resetTableToIdle(Table table, Location dropAt) {
+        if (table == null) {
+            return;
+        }
+        cancelVote(table, null);
+        cancelLootArmsForTable(table.getId());
+        table.bumpRecycleGen();
+        table.bumpPayoutGen();
+        table.clearSession();
+        Game removed = gameOf(table);
+        if (removed != null) {
+            removed.onTableRemoved(table);
+        }
+        for (UUID playerId : new ArrayList<>(table.getHands().keySet())) {
+            discardPlayerCards(table, playerId);
+        }
+        despawnTablePiles(table, true);
+        settleAutoTray(table, dropAt);
+        clearFeltNow(table, null);
+        table.actives().clear();
+        table.setDealerId(null);
+        table.setStreet(1);
+        if (table.getDeck() != null) {
+            table.getDeck().reshuffleAll();
+        }
+        save(table);
     }
 
     public void rebuildAllStacks() {
@@ -361,10 +389,29 @@ public final class TableManager implements Listener {
         Deck deck = created.get();
         deck.shuffle();
         Table table = new Table(UUID.randomUUID(), arm.gameId, origin, player.getLocation().getYaw(), deck);
-        if (arm.house != null) {
-            arm.house.apply(table);
+        TableHouse house = arm.house;
+        if (house == null && "blackjack".equalsIgnoreCase(arm.gameId)) {
+            house = TableHouse.forPlace(player, Cache.layoutOf("blackjack"));
+            GuildTables.stampGuild(player, house);
+        }
+        if (house != null) {
+            if ("blackjack".equalsIgnoreCase(arm.gameId)) {
+                String refuse = GuildTables.refuseKey(player, house, null);
+                if (refuse != null) {
+                    arms.remove(player.getUniqueId());
+                    GuiSounds.deny(player);
+                    GuildTables.tellRefuse(player, refuse, house);
+                    return true;
+                }
+            }
+            house.apply(table);
         } else {
             table.setOwnerPlayer(player.getUniqueId());
+            TableLayout layout = Cache.layoutOf(arm.gameId);
+            if (layout != null) {
+                table.setSmallBlind(layout.smallBlind());
+                table.setBigBlind(layout.bigBlind());
+            }
         }
         try {
             spawnWorld(table);
@@ -514,6 +561,13 @@ public final class TableManager implements Listener {
         }
         if (table.live()) {
             Game game = gameOf(table);
+            if (game != null && allowReturnSelected(table, player)) {
+                int n = countSelected(table, player);
+                if (n > 0 && tryReturnSelected(table, player)) {
+                    game.onReturnedSelected(table, player, n);
+                    return;
+                }
+            }
             if (game != null) {
                 game.onShoeClick(table, player);
             }
@@ -587,7 +641,7 @@ public final class TableManager implements Listener {
         table.bumpRecycleGen();
         cancelLootArmsForTable(table.getId());
         Location dropAt = table.getOrigin().clone();
-        returnGuildTray(table);
+        settleAutoTray(table, dropAt);
         clearFeltNow(table, player);
         returnAllHands(table, false, false);
         table.actives().clear();
@@ -660,10 +714,22 @@ public final class TableManager implements Listener {
         StringBuilder text = new StringBuilder(Messages.get("label.title", "name", base));
         boolean auto = table.autoDealer();
         UUID dealer = table.dealerId();
-        if (auto) {
-            text.append("\n").append(Messages.get("label.dealer", "name", "Auto"));
-        } else if (dealer != null) {
-            text.append("\n").append(Messages.get("label.dealer", "name", RpNames.of(dealer)));
+        if ("blackjack".equalsIgnoreCase(table.getGameId())) {
+            text.append("\n").append(Messages.get(table.shufflePolicy() == ShufflePolicy.ROUND
+                    ? "label.shuffle_round" : "label.shuffle_shoe"));
+        }
+        String guildName = GuildTables.displayName(table.ownerGuildId());
+        if (guildName != null) {
+            text.append("\n").append(Messages.get("label.owner", "name", guildName));
+        }
+        Game game = gameOf(table);
+        boolean stockDealer = game == null || game.showStockDealer();
+        if (stockDealer) {
+            if (auto) {
+                text.append("\n").append(Messages.get("label.dealer", "name", "Auto"));
+            } else if (dealer != null) {
+                text.append("\n").append(Messages.get("label.dealer", "name", RpNames.of(dealer)));
+            }
         }
         if (table.minBet() > 0 || table.maxBet() > 0) {
             String min = table.minBet() > 0 ? String.valueOf(table.minBet()) : "-";
@@ -674,9 +740,15 @@ public final class TableManager implements Listener {
             text.append("\n").append(Messages.get("label.open"));
         }
         if (table.autoCountdown() > 0) {
-            text.append("\n").append(Messages.get("label.countdown", "seconds", String.valueOf(table.autoCountdown())));
+            String seconds = String.valueOf(table.autoCountdown());
+            String key = "label.countdown";
+            if (table.live()) {
+                key = "label.countdown_round";
+            } else if (table.betOpen()) {
+                key = "label.countdown_bets";
+            }
+            text.append("\n").append(Messages.get(key, "seconds", seconds));
         }
-        Game game = gameOf(table);
         if (game != null) {
             String extra = game.extraLabel(table);
             if (extra != null && !extra.isBlank()) {
@@ -691,7 +763,12 @@ public final class TableManager implements Listener {
         for (Table table : tables.values()) {
             if (id.equals(table.dealerId())) {
                 table.setDealerId(null);
-                refreshLabel(table);
+                Game game = gameOf(table);
+                if (game != null) {
+                    game.onTableReady(table);
+                } else {
+                    refreshLabel(table);
+                }
             }
         }
     }
@@ -1103,6 +1180,10 @@ public final class TableManager implements Listener {
             player.sendMessage(Messages.get("wager.paying"));
             return;
         }
+        if ("blackjack".equalsIgnoreCase(table.getGameId())) {
+            player.sendMessage(Messages.get("wager.coins_only"));
+            return;
+        }
         ItemStack held = player.getInventory().getItemInMainHand();
         if (held == null || held.getType() == org.bukkit.Material.AIR || held.getAmount() <= 0) {
             player.sendMessage(Messages.get("wager.need_item"));
@@ -1191,16 +1272,11 @@ public final class TableManager implements Listener {
         Table best = null;
         double bestDist = Double.MAX_VALUE;
         for (Table table : tables.values()) {
-            Location origin = table.getOrigin();
-            if (origin == null || origin.getWorld() == null || !origin.getWorld().equals(loc.getWorld())) {
+            if (!atTable(player, table)) {
                 continue;
             }
-            double leave = Cache.leaveDistanceOf(table.getGameId());
-            if (leave <= 0) {
-                continue;
-            }
-            double dist = origin.distance(loc);
-            if (dist <= leave && dist < bestDist) {
+            double dist = table.getOrigin().distance(loc);
+            if (dist < bestDist) {
                 best = table;
                 bestDist = dist;
             }
@@ -2088,7 +2164,13 @@ public final class TableManager implements Listener {
     }
 
     private boolean tryOpenHouseOptions(Table table, Player player) {
-        if (table == null || player == null || !"blackjack".equalsIgnoreCase(table.getGameId())) {
+        if (table == null || player == null) {
+            return false;
+        }
+        String gameId = table.getGameId();
+        boolean blackjack = "blackjack".equalsIgnoreCase(gameId);
+        boolean poker = "poker".equalsIgnoreCase(gameId);
+        if (!blackjack && !poker) {
             return false;
         }
         if (table.live()) {
@@ -2096,6 +2178,9 @@ public final class TableManager implements Listener {
             return true;
         }
         if (!canEditHouse(player, table)) {
+            if (poker) {
+                return false;
+            }
             player.sendMessage(Messages.get("place.options_denied"));
             return true;
         }
@@ -2130,6 +2215,15 @@ public final class TableManager implements Listener {
             table.setMaxBoxes(data.maxBoxes);
         }
         table.setShufflePolicy(ShufflePolicy.parse(data.shufflePolicy));
+        if (data.smallBlind == null && data.bigBlind == null) {
+            if (layout != null) {
+                table.setSmallBlind(layout.smallBlind());
+                table.setBigBlind(layout.bigBlind());
+            }
+        } else {
+            table.setSmallBlind(data.smallBlind != null ? data.smallBlind : 0);
+            table.setBigBlind(data.bigBlind != null ? data.bigBlind : 0);
+        }
     }
 
     private void tryManualFlush(Table table, Player player) {
@@ -2178,7 +2272,9 @@ public final class TableManager implements Listener {
             return null;
         }
         String key = raw.toLowerCase(Locale.ROOT);
-        if (key.equals("hit") || key.equals("stand") || key.equals("double") || key.equals("split")) {
+        if (key.equals("hit") || key.equals("stand") || key.equals("double") || key.equals("split")
+                || key.equals("check") || key.equals("call") || key.equals("fold") || key.equals("raise")
+                || key.equals("draw")) {
             return key;
         }
         return null;
@@ -2189,8 +2285,11 @@ public final class TableManager implements Listener {
             return false;
         }
         Table table = tableNearby(player);
-        return table != null && table.live() && "play".equals(table.phase())
-                && player.getUniqueId().equals(table.actor());
+        if (table == null || !table.live() || !player.getUniqueId().equals(table.actor())) {
+            return false;
+        }
+        Game game = gameOf(table);
+        return game != null && game.allowPlayChat(table, player);
     }
 
     public void applyPlayCall(Player player, String action) {
@@ -2207,8 +2306,7 @@ public final class TableManager implements Listener {
             case "stand" -> game.onBetStand(table, player);
             case "double" -> game.onBetDouble(table, player);
             case "split" -> game.onBetSplit(table, player);
-            default -> {
-            }
+            default -> game.onPlayWord(table, player, action);
         }
     }
 
@@ -2714,6 +2812,11 @@ public final class TableManager implements Listener {
         if (felt == null || !felt.table().getId().equals(arm.tableId)) {
             return false;
         }
+        if ("blackjack".equalsIgnoreCase(table.getGameId())) {
+            clearLootArm(player.getUniqueId(), false);
+            player.sendMessage(Messages.get("wager.coins_only"));
+            return true;
+        }
         ItemStack held = player.getInventory().getItemInMainHand();
         if (held == null || !held.isSimilar(arm.item) || held.getAmount() < arm.item.getAmount()) {
             player.sendMessage(Messages.get("wager.wrong_item"));
@@ -2920,6 +3023,12 @@ public final class TableManager implements Listener {
         }
         Table table = felt.table();
         Location hit = felt.hit();
+        ItemStack held = player.getInventory().getItemInMainHand();
+        boolean empty = held == null || held.getType() == org.bukkit.Material.AIR || held.getAmount() <= 0;
+        if (!empty && "blackjack".equalsIgnoreCase(table.getGameId()) && !ChipItems.isMoneyCoin(held)
+                && !wagerLike(held)) {
+            return false;
+        }
         if (inShoeZone(table, hit)) {
             player.sendMessage(Messages.get("wager.no_bet_zone"));
             return true;
@@ -2936,8 +3045,11 @@ public final class TableManager implements Listener {
         if (table.isPaying()) {
             return true;
         }
-        ItemStack held = player.getInventory().getItemInMainHand();
-        if (held == null || held.getType() == org.bukkit.Material.AIR || held.getAmount() <= 0) {
+        if (empty) {
+            return true;
+        }
+        if ("blackjack".equalsIgnoreCase(table.getGameId()) && !ChipItems.isMoneyCoin(held)) {
+            player.sendMessage(Messages.get("wager.coins_only"));
             return true;
         }
         if (ChipItems.needsDeclaredValue(held)) {
@@ -2984,8 +3096,14 @@ public final class TableManager implements Listener {
         } else {
             save(table);
         }
+        lockHand(table, player, false);
         markSelectCooldown(player);
         return true;
+    }
+
+    private static boolean wagerLike(ItemStack held) {
+        return ChipItems.isChipKind(held) || ChipItems.decoChips(held) != null
+                || ChipItems.integerDenars(held).isPresent();
     }
 
     private FeltHit findFelt(Player player, Location click) {
@@ -2993,13 +3111,25 @@ public final class TableManager implements Listener {
         if (eye.getWorld() == null) {
             return null;
         }
-        FeltHit best = null;
-        double bestDist = Double.MAX_VALUE;
+        List<Table> nearby = new ArrayList<>();
+        Table closest = null;
+        double closestPlayer = Double.MAX_VALUE;
+        Location feet = player.getLocation();
         for (Table table : tables.values()) {
-            Location origin = table.getOrigin();
-            if (origin.getWorld() == null || !origin.getWorld().equals(eye.getWorld())) {
+            if (!atTable(player, table)) {
                 continue;
             }
+            nearby.add(table);
+            double d = table.getOrigin().distance(feet);
+            if (d < closestPlayer) {
+                closestPlayer = d;
+                closest = table;
+            }
+        }
+        FeltHit best = null;
+        double bestDist = Double.MAX_VALUE;
+        for (Table table : nearby) {
+            Location origin = table.getOrigin();
             Location hit;
             if (click != null && click.getWorld() != null && click.getWorld().equals(origin.getWorld())) {
                 hit = origin.clone();
@@ -3011,7 +3141,7 @@ public final class TableManager implements Listener {
             if (hit == null) {
                 continue;
             }
-            boolean onPlay = onPlayArea(table, player, hit);
+            boolean onPlay = onPlayArea(table, player, hit, table == closest);
             boolean onTray = inTrayZone(table, hit);
             if (!onPlay && !onTray) {
                 continue;
@@ -3111,15 +3241,25 @@ public final class TableManager implements Listener {
     }
 
     private boolean onPlayArea(Table table, Player player, Location hit) {
+        return onPlayArea(table, player, hit, true);
+    }
+
+    private boolean onPlayArea(Table table, Player player, Location hit, boolean allowBetPad) {
         if (table == null || hit == null) {
             return false;
         }
-        TableLayout layout = Cache.layoutOf(table.getGameId());
-        if (layout != null && layout.betZone() != null && layout.betZone().present() && player != null) {
-            HandLock lock = lockHand(table, player, false);
-            return layout.inBetZone(hit, lock.x(), lock.z(), lock.placeYaw());
+        if (onFelt(table, hit)) {
+            return true;
         }
-        return onFelt(table, hit);
+        if (!allowBetPad || player == null) {
+            return false;
+        }
+        TableLayout layout = Cache.layoutOf(table.getGameId());
+        if (layout == null || layout.betZone() == null || !layout.betZone().present()) {
+            return false;
+        }
+        HandLock lock = peekHandLock(table, player, false);
+        return layout.inBetZone(hit, lock.x(), lock.z(), lock.placeYaw());
     }
 
     private Location betPadCenter(Table table, Player player) {
@@ -3127,7 +3267,7 @@ public final class TableManager implements Listener {
         if (layout == null || layout.betZone() == null || !layout.betZone().present() || player == null) {
             return null;
         }
-        HandLock lock = lockHand(table, player, false);
+        HandLock lock = peekHandLock(table, player, false);
         return layout.betPadCenter(table, lock.x(), lock.z(), lock.placeYaw());
     }
 
@@ -3539,12 +3679,15 @@ public final class TableManager implements Listener {
         notifyFeltPiles(table);
     }
 
-    private void returnGuildTray(Table table) {
-        if (table == null || !GuildTables.counts(table)) {
+    /**
+     * Auto-dealer tray: staff mint is deleted; guild auto banks, or drops if the guild is gone.
+     */
+    private void settleAutoTray(Table table, Location dropAt) {
+        if (table == null || !table.autoDealer()) {
             return;
         }
-        int tray = 0;
         List<PotPile> piles = new ArrayList<>();
+        int tray = 0;
         for (PotPile pile : new ArrayList<>(table.getPiles())) {
             if (!isTrayPile(table, pile)) {
                 continue;
@@ -3552,16 +3695,22 @@ public final class TableManager implements Listener {
             tray += pile.contribution();
             piles.add(pile);
         }
-        if (tray > 0) {
-            GuildTables.deposit(table.ownerGuildId(), tray);
+        if (piles.isEmpty()) {
+            return;
         }
+        boolean drop = false;
+        if (!table.staffMint()) {
+            drop = !GuildTables.tryDeposit(table.ownerGuildId(), tray);
+        }
+        Location at = dropAt != null ? dropAt : (table.getOrigin() != null ? table.getOrigin().clone() : null);
         for (PotPile pile : piles) {
             despawnPile(pile);
+            if (drop && at != null) {
+                givePileItems(pile, null, at);
+            }
             table.getPiles().remove(pile);
         }
-        if (!piles.isEmpty()) {
-            notifyFeltPiles(table);
-        }
+        notifyFeltPiles(table);
     }
 
     private boolean trySelectCard(Player player) {
@@ -3639,6 +3788,23 @@ public final class TableManager implements Listener {
     }
 
     private record HandHit(Table table, HandCard card) {}
+
+    private static int countSelected(Table table, Player player) {
+        if (table == null || player == null) {
+            return 0;
+        }
+        List<HandCard> hand = table.getHands().get(player.getUniqueId());
+        if (hand == null) {
+            return 0;
+        }
+        int n = 0;
+        for (HandCard held : hand) {
+            if (held.isSelected()) {
+                n++;
+            }
+        }
+        return n;
+    }
 
     private boolean tryReturnSelected(Table table, Player player) {
         if (revealBusy.contains(player.getUniqueId())) {
@@ -4624,6 +4790,12 @@ public final class TableManager implements Listener {
     }
 
     private HandLock lockHand(Table table, Player player, boolean force) {
+        HandLock next = peekHandLock(table, player, force);
+        handLocks.put(player.getUniqueId(), next);
+        return next;
+    }
+
+    private HandLock peekHandLock(Table table, Player player, boolean force) {
         Location origin = table.getOrigin();
         HandAnchor.Raw raw = HandAnchor.resolve(player, origin);
         UUID id = player.getUniqueId();
@@ -4656,9 +4828,27 @@ public final class TableManager implements Listener {
                 yaw = last.placeYaw();
             }
         }
-        HandLock next = new HandLock(yaw, x, z, y, sitting);
-        handLocks.put(id, next);
-        return next;
+        return new HandLock(yaw, x, z, y, sitting);
+    }
+
+    private static boolean atTable(Player player, Table table) {
+        if (player == null || table == null) {
+            return false;
+        }
+        Location origin = table.getOrigin();
+        Location loc = player.getLocation();
+        if (origin == null || origin.getWorld() == null || loc.getWorld() == null
+                || !origin.getWorld().equals(loc.getWorld())) {
+            return false;
+        }
+        double leave = Cache.leaveDistanceOf(table.getGameId());
+        if (leave <= 0) {
+            return false;
+        }
+        if (Math.abs(loc.getY() - origin.getY()) > TABLE_Y_SLOP) {
+            return false;
+        }
+        return origin.distance(loc) <= leave;
     }
 
     private static Location lockLocation(Player player, HandLock lock) {
@@ -4856,6 +5046,8 @@ public final class TableManager implements Listener {
         data.maxBet = table.maxBet();
         data.maxBoxes = table.maxBoxes();
         data.shufflePolicy = table.shufflePolicy().name();
+        data.smallBlind = table.smallBlind();
+        data.bigBlind = table.bigBlind();
         return data;
     }
 
@@ -5048,6 +5240,8 @@ public final class TableManager implements Listener {
         int maxBet;
         int maxBoxes;
         String shufflePolicy;
+        Integer smallBlind;
+        Integer bigBlind;
     }
 
     static final class PileData {

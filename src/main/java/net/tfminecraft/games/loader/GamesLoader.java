@@ -110,7 +110,7 @@ public final class GamesLoader implements LoaderInterface {
         double noBet = section.getDouble("no-bet-radius", 0);
         boolean hitsSoft17 = section.getBoolean("dealer-hits-soft-17", false);
         boolean autoDealer = section.getBoolean("auto-dealer", false);
-        int minBet = Math.max(0, section.getInt("min-bet", 0));
+        int minBet = Math.max(1, section.getInt("min-bet", 1));
         int maxBet = Math.max(0, section.getInt("max-bet", 0));
         int betSeconds = Math.max(1, section.getInt("bet-seconds", 10));
         VoiceLines voice = VoiceLines.defaults();
@@ -131,6 +131,19 @@ public final class GamesLoader implements LoaderInterface {
         int resultDelay = Math.max(0, section.getInt("result-delay-ticks", 8));
         int roundEnd = Math.max(1, section.getInt("round-end-seconds", 10));
         int maxBoxes = Math.max(0, section.getInt("max-boxes", 0));
+        int smallBlind = 0;
+        int bigBlind = 0;
+        ConfigurationSection blinds = section.getConfigurationSection("blinds");
+        if (blinds != null) {
+            int small = blinds.getInt("small", 0);
+            int big = blinds.getInt("big", 0);
+            if (small > 0) {
+                smallBlind = Math.max(1, small);
+            }
+            if (big > 0) {
+                bigBlind = Math.max(1, big);
+            }
+        }
         SoundFx chipFx = null;
         ConfigurationSection chipSec = section.getConfigurationSection("chip-sound");
         if (chipSec != null) {
@@ -141,7 +154,8 @@ public final class GamesLoader implements LoaderInterface {
                     (float) chipSec.getDouble("pitch", Cache.chipSoundPitch));
         }
         return new TableLayout(cardSet, label, icon, leave, piles, ring, box, stand, noBet, hitsSoft17,
-                autoDealer, minBet, maxBet, betSeconds, voice, betZone, resultDelay, roundEnd, chipFx, maxBoxes);
+                autoDealer, minBet, maxBet, betSeconds, voice, betZone, resultDelay, roundEnd, chipFx, maxBoxes,
+                smallBlind, bigBlind);
     }
 
     private static void loadRankValues(String gameId, ConfigurationSection section) {

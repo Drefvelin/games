@@ -21,6 +21,8 @@ public final class TableHouse {
     private int maxBet;
     private int maxBoxes;
     private ShufflePolicy shufflePolicy = ShufflePolicy.SHOE;
+    private int smallBlind;
+    private int bigBlind;
 
     public static TableHouse forPlace(Player player, TableLayout layout) {
         TableHouse house = new TableHouse();
@@ -34,11 +36,18 @@ public final class TableHouse {
             house.staffMint = true;
         }
         if (layout != null) {
-            house.minBet = layout.minBet();
-            house.maxBet = layout.maxBet();
+            house.minBet = Math.max(1, layout.minBet());
+            house.maxBet = Math.max(house.minBet, layout.maxBet());
             house.maxBoxes = layout.maxBoxes();
+        } else {
+            house.minBet = 1;
+            house.maxBet = 1;
         }
         house.shufflePolicy = ShufflePolicy.SHOE;
+        if (layout != null) {
+            house.smallBlind = Math.max(0, layout.smallBlind());
+            house.bigBlind = Math.max(0, layout.bigBlind());
+        }
         return house;
     }
 
@@ -51,10 +60,12 @@ public final class TableHouse {
         house.ownerGuildId = table.ownerGuildId();
         house.autoDealer = table.autoDealer();
         house.staffMint = table.staffMint();
-        house.minBet = table.minBet();
-        house.maxBet = table.maxBet();
+        house.minBet = Math.max(1, table.minBet());
+        house.maxBet = Math.max(house.minBet, table.maxBet());
         house.maxBoxes = table.maxBoxes();
         house.shufflePolicy = table.shufflePolicy();
+        house.smallBlind = table.smallBlind();
+        house.bigBlind = table.bigBlind();
         return house;
     }
 
@@ -70,6 +81,8 @@ public final class TableHouse {
         table.setMaxBet(maxBet);
         table.setMaxBoxes(maxBoxes);
         table.setShufflePolicy(shufflePolicy);
+        table.setSmallBlind(smallBlind);
+        table.setBigBlind(bigBlind);
     }
 
     public UUID ownerPlayer() {
@@ -115,7 +128,10 @@ public final class TableHouse {
     }
 
     public void setMinBet(int minBet) {
-        this.minBet = Math.max(0, minBet);
+        this.minBet = Math.max(1, minBet);
+        if (this.maxBet < this.minBet) {
+            this.maxBet = this.minBet;
+        }
     }
 
     public int maxBet() {
@@ -123,7 +139,7 @@ public final class TableHouse {
     }
 
     public void setMaxBet(int maxBet) {
-        this.maxBet = Math.max(0, maxBet);
+        this.maxBet = Math.max(this.minBet, maxBet);
     }
 
     public int maxBoxes() {
@@ -140,5 +156,21 @@ public final class TableHouse {
 
     public void setShufflePolicy(ShufflePolicy shufflePolicy) {
         this.shufflePolicy = shufflePolicy != null ? shufflePolicy : ShufflePolicy.SHOE;
+    }
+
+    public int smallBlind() {
+        return smallBlind;
+    }
+
+    public void setSmallBlind(int smallBlind) {
+        this.smallBlind = Math.max(0, smallBlind);
+    }
+
+    public int bigBlind() {
+        return bigBlind;
+    }
+
+    public void setBigBlind(int bigBlind) {
+        this.bigBlind = Math.max(0, bigBlind);
     }
 }

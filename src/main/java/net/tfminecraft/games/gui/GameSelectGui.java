@@ -16,16 +16,16 @@ import org.bukkit.persistence.PersistentDataType;
 import me.Plugins.TLibs.TLibs;
 import net.tfminecraft.games.Messages;
 import net.tfminecraft.games.cache.Cache;
-import net.tfminecraft.games.gui.TableOptionsGui;
 import net.tfminecraft.games.table.TableManager;
 import net.tfminecraft.games.utils.Keys;
 
 public final class GameSelectGui implements Listener {
 
     private static final int SIZE = 27;
-    private static final int POKER_SLOT = 11;
-    private static final int FREEPLAY_SLOT = 13;
-    private static final int BLACKJACK_SLOT = 15;
+    private static final int POKER_SLOT = 10;
+    private static final int DRAW_SLOT = 12;
+    private static final int FREEPLAY_SLOT = 14;
+    private static final int BLACKJACK_SLOT = 16;
 
     private GameSelectGui() {}
 
@@ -36,6 +36,7 @@ public final class GameSelectGui implements Listener {
         Inventory inventory = Bukkit.createInventory(holder, SIZE, Messages.get("place.gui_title"));
         holder.setInventory(inventory);
         inventory.setItem(POKER_SLOT, gameIcon("poker", "place.gui_poker"));
+        inventory.setItem(DRAW_SLOT, gameIcon("draw", "place.gui_draw"));
         inventory.setItem(FREEPLAY_SLOT, gameIcon("freeplay", "place.gui_freeplay"));
         inventory.setItem(BLACKJACK_SLOT, gameIcon("blackjack", "place.gui_blackjack"));
         player.openInventory(inventory);
@@ -78,9 +79,14 @@ public final class GameSelectGui implements Listener {
         if (gameId == null || gameId.isBlank()) {
             return;
         }
+        GuiSounds.click(player);
         player.closeInventory();
         if ("blackjack".equalsIgnoreCase(gameId)) {
             TableOptionsGui.openPlace(player, holder.requireDeck(), holder.pendingHit());
+            return;
+        }
+        if ("poker".equalsIgnoreCase(gameId)) {
+            TableOptionsGui.openPlace(player, holder.requireDeck(), holder.pendingHit(), "poker");
             return;
         }
         TableManager.get().selectGame(player, gameId, holder.pendingHit(), holder.requireDeck());

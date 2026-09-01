@@ -2,7 +2,7 @@
 
 Tabletop plugin. Engines are dumb: they cannot tell poker from blackjack. Games only call engines.
 
-Phase 1 (session + auto-deal + per-game layout) is done. **Phase 2 is blackjack** ([BLACKJACK.md](BLACKJACK.md)). **Phase 3 is Hold'em**. Poker tables stay sandbox plus leave payout until Phase 3.
+Phase 1 (session + auto-deal + per-game layout) is done. **Three games:** blackjack ([BLACKJACK.md](BLACKJACK.md)), Tenceur Hold'em ([HOLDEM.md](HOLDEM.md), id `poker`), Five-Draw ([FIVEDRAW.md](FIVEDRAW.md), id `draw`). Hold'em and Five-Draw numbered batches are coded; both await in-game testing. Plugin stop and crash boot reset tables to idle (location and house settings persist; no mid-hand resume).
 
 Batch 1 shipped config shells, `/games reload`, and documentation. Nothing is placed in the world yet.
 
@@ -52,7 +52,8 @@ games/
 | Table | placed deck, yaw, who is in range, persist | Hand ranking |
 | Selector | ray to closest token | Discard vs play meaning |
 | Wager | piles tagged by owner (null = communal) and street; refund/payout filters; manual shoe flush | Blinds, 21, house vs pot |
-| Poker | leave settlement until Phase 3; then blinds, streets, showdown | Packets, IA ids, ray math |
+| Poker (Hold'em, id `poker`) | blinds display, streets, showdown, side pots | Packets, IA ids, ray math |
+| Five-Draw (id `draw`) | five-card draw, discard round, showdown | Packets, IA ids, ray math |
 | Blackjack | claim, bet window, 21, double/split, house pay (Phase 2) | Packets, shuffle |
 
 A class is an engine if it cannot tell whether the game is poker or blackjack.

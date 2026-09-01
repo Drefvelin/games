@@ -107,9 +107,28 @@ public interface Game {
 
     default void onBetSplit(Table table, Player player) {}
 
+    /**
+     * Chat /games bet play words. Blackjack: phase play and actor.
+     */
+    default boolean allowPlayChat(Table table, Player player) {
+        return table != null && player != null && table.live()
+                && "play".equals(table.phase())
+                && player.getUniqueId().equals(table.actor());
+    }
+
+    default void onPlayWord(Table table, Player player, String word) {}
+
+    /** After selected cards were returned to the shoe while live. */
+    default void onReturnedSelected(Table table, Player player, int count) {}
+
     /** Extra shoe hologram lines. Empty means none. */
     default String extraLabel(Table table) {
         return "";
+    }
+
+    /** When false, the stock Auto/Dealer hologram line is skipped (game extraLabel owns it). */
+    default boolean showStockDealer() {
+        return true;
     }
 
     default DisplayPose tablePileSlot(Table table, String pile, int index, int count, boolean faceUp) {

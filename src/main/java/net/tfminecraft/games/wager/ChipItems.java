@@ -38,6 +38,14 @@ public final class ChipItems {
         return namedCoin(stack) != null || itemOverride(stack) != null || coinOf(stack) != null;
     }
 
+    /** Configured gold/silver coin items or a DenarEconomy coin. Not {@code wager.items} (gold ingot). */
+    public static boolean isMoneyCoin(ItemStack stack) {
+        if (stack == null || stack.getType() == Material.AIR) {
+            return false;
+        }
+        return namedCoin(stack) != null || coinOf(stack) != null;
+    }
+
     public static boolean needsDeclaredValue(ItemStack stack) {
         if (stack == null || stack.getType() == Material.AIR || stack.getAmount() <= 0) {
             return false;

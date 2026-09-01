@@ -46,7 +46,7 @@ No "please top up" wait. Cover is withdraw-or-refuse.
 3. Staff auto: spawn `need` (today).
 4. Guild auto: if bank wealth `< need` or bankrupt / no bank, **do not accept that chip-in** (restore item, message). Else `withdraw(need)`, spawn on tray.
 5. Player wins peel the tray; settle shortfall (3:2) uses the same withdraw-or-fail for the extra only.
-6. Pickup / teardown: `deposit` remaining tray denars into that guild bank, then despawn tray piles.
+6. Pickup / teardown: guild auto tray `deposit`s to the owning guild bank; if that guild is gone, drop the tray items. Staff mint tray is despawned, not dropped. Player pots still drop.
 
 House wins stay on the tray (already guild money as chips).
 

@@ -4,11 +4,33 @@ poker:
   leave-distance: 6
   # Named set from cards.yml. Poker does not deal jokers even if french_54 gains them later.
   card-set: french_52
-  label: Poker
+  label: Tenceur Hold'em
   # TLibs IA path for the game-select GUI icon.
   icon: ia.tfmc_games:oseni_1
   # Catalog rank (cards.yml) -> sort/play value. Unlisted ranks keep the catalog number.
   # Ace is rank 1 in the catalog; poker treats it as 14 (high).
+  rank-values:
+    1: 14
+  blinds:
+    small: 5
+    big: 10
+  piles:
+    board:
+      forward: 0.55
+      right: 0
+    dealer:
+      forward: 1.10
+      right: 0
+  felt:
+    type: ring
+    min-range: 0.3
+    max-range: 1.2
+
+draw:
+  leave-distance: 6
+  card-set: french_52
+  label: Five-Draw
+  icon: ia.tfmc_games:seithr_5
   rank-values:
     1: 14
   piles:

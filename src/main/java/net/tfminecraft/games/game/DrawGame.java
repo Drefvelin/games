@@ -18,21 +18,18 @@ import net.tfminecraft.games.Messages;
 import net.tfminecraft.games.card.Card;
 import net.tfminecraft.games.table.HandCard;
 import net.tfminecraft.games.table.PayoutFlight;
-import net.tfminecraft.games.table.ShufflePolicy;
 import net.tfminecraft.games.table.Table;
 import net.tfminecraft.games.table.TableManager;
 import net.tfminecraft.games.voice.RpNames;
 import net.tfminecraft.games.wager.PotPile;
 
 /**
- * Hold'em seats, button, holes, streets, and board deal.
+ * Five-Draw seats, deal, draw round, and showdown.
  */
-public final class PokerGame implements Game {
+public final class DrawGame implements Game {
 
-    public static final String PREFLOP = "preflop";
-    public static final String FLOP = "flop";
-    public static final String TURN = "turn";
-    public static final String RIVER = "river";
+    public static final String BET = "bet";
+    public static final String DRAW = "draw";
     public static final String SHOWDOWN = "showdown";
 
     private static final class Street {
@@ -40,6 +37,7 @@ public final class PokerGame implements Game {
         final Set<UUID> folded = new HashSet<>();
         final Set<UUID> acted = new HashSet<>();
         final Set<UUID> capped = new HashSet<>();
+        final Set<UUID> drawn = new HashSet<>();
     }
 
     private final Map<UUID, Street> streets = new HashMap<>();
@@ -56,7 +54,17 @@ public final class PokerGame implements Game {
 
     @Override
     public boolean allowReturnSelected(Table table, Player player) {
-        return table != null && !table.live();
+        if (table == null || player == null) {
+            return false;
+        }
+        if (!table.live()) {
+            return true;
+        }
+        if (!DRAW.equals(table.phase()) || !player.getUniqueId().equals(table.actor())) {
+            return false;
+        }
+        Street street = streets.get(table.getId());
+        return street != null && !street.drawn.contains(player.getUniqueId());
     }
 
     @Override
@@ -82,19 +90,17 @@ public final class PokerGame implements Game {
         List<Player> online = seatedOnline(table);
         if (online.size() < 2) {
             for (Player player : online) {
-                player.sendMessage(Messages.get("poker.need_players"));
+                player.sendMessage(Messages.get("draw.need_players"));
             }
             TableManager.get().endSession(table);
             return;
         }
-        if (table.shufflePolicy() == ShufflePolicy.ROUND) {
-            TableManager.get().reshuffleFull(table);
-        }
-        table.setPhase(PREFLOP);
+        TableManager.get().reshuffleFull(table);
+        table.setPhase(BET);
         table.setStreet(1);
         table.setActor(null);
         TableManager.get().refreshLabel(table);
-        dealHoles(table, holeQueue(table), 0);
+        dealHands(table, dealQueue(table), 0);
     }
 
     @Override
@@ -120,7 +126,7 @@ public final class PokerGame implements Game {
     @Override
     public boolean allowPlayChat(Table table, Player player) {
         return table != null && player != null && table.live()
-                && bettingPhase(table.phase())
+                && (BET.equals(table.phase()) || DRAW.equals(table.phase()))
                 && player.getUniqueId().equals(table.actor());
     }
 
@@ -137,14 +143,26 @@ public final class PokerGame implements Game {
         if (street.folded.contains(id)) {
             return;
         }
+        if (DRAW.equals(table.phase())) {
+            if (!"draw".equals(word)) {
+                return;
+            }
+            if (hasSelected(table, id)) {
+                return;
+            }
+            street.drawn.add(id);
+            player.sendMessage(Messages.get("draw.stood"));
+            nextDrawActor(table, street, id);
+            return;
+        }
         int contrib = streetContrib(table, id);
         switch (word) {
             case "check" -> {
                 if (contrib < street.currentBet) {
-                    player.sendMessage(Messages.get("poker.cannot_check"));
+                    player.sendMessage(Messages.get("draw.cannot_check"));
                     return;
                 }
-                player.sendMessage(Messages.get("poker.checked"));
+                player.sendMessage(Messages.get("draw.checked"));
             }
             case "call" -> {
                 if (contrib < street.currentBet) {
@@ -152,22 +170,22 @@ public final class PokerGame implements Game {
                 } else {
                     street.capped.remove(id);
                 }
-                player.sendMessage(Messages.get("poker.called"));
+                player.sendMessage(Messages.get("draw.called"));
             }
             case "raise" -> {
                 if (contrib <= street.currentBet) {
-                    player.sendMessage(Messages.get("poker.need_chips"));
+                    player.sendMessage(Messages.get("draw.need_chips"));
                     return;
                 }
                 street.currentBet = contrib;
                 street.acted.clear();
                 street.capped.remove(id);
-                player.sendMessage(Messages.get("poker.raised", "n", String.valueOf(street.currentBet)));
+                player.sendMessage(Messages.get("draw.raised", "n", String.valueOf(street.currentBet)));
             }
             case "fold" -> {
                 street.folded.add(id);
                 TableManager.get().muckPlayer(table, id);
-                player.sendMessage(Messages.get("poker.folded"));
+                player.sendMessage(Messages.get("draw.folded"));
             }
             default -> {
                 return;
@@ -175,6 +193,37 @@ public final class PokerGame implements Game {
         }
         street.acted.add(id);
         finishOrAdvance(table, true);
+    }
+
+    @Override
+    public void onReturnedSelected(Table table, Player player, int count) {
+        if (table == null || player == null || count < 1 || !table.live() || !DRAW.equals(table.phase())) {
+            return;
+        }
+        Street street = streets.get(table.getId());
+        if (street == null || street.drawn.contains(player.getUniqueId())) {
+            return;
+        }
+        UUID id = player.getUniqueId();
+        if (!id.equals(table.actor()) || street.folded.contains(id)) {
+            return;
+        }
+        TableManager.get().dealToPlayer(table, player, count, () -> {
+            Table still = TableManager.get().table(table.getId());
+            if (still == null || !still.live() || !DRAW.equals(still.phase())) {
+                return;
+            }
+            Street liveStreet = streets.get(still.getId());
+            if (liveStreet == null) {
+                return;
+            }
+            liveStreet.drawn.add(id);
+            Player online = Bukkit.getPlayer(id);
+            if (online != null && online.isOnline()) {
+                online.sendMessage(Messages.get("draw.drew", "n", String.valueOf(count)));
+            }
+            nextDrawActor(still, liveStreet, id);
+        });
     }
 
     @Override
@@ -213,45 +262,34 @@ public final class PokerGame implements Game {
             return "";
         }
         StringBuilder text = new StringBuilder();
-        int small = table.smallBlind();
-        int big = table.bigBlind();
-        if (small > 0 || big > 0) {
-            text.append(Messages.get("label.blinds",
-                    "small", String.valueOf(small),
-                    "big", String.valueOf(big)));
-        }
-        if (text.length() > 0) {
-            text.append("\n");
-        }
-        text.append(Messages.get(table.shufflePolicy() == ShufflePolicy.ROUND
-                ? "label.shuffle_round" : "label.shuffle_shoe"));
         UUID button = table.dealerId();
         if (button != null) {
-            if (text.length() > 0) {
-                text.append("\n");
-            }
             text.append(Messages.get("label.button", "name", RpNames.of(button)));
         }
         if (table.live()) {
             if (text.length() > 0) {
                 text.append("\n");
             }
-            text.append(streetLabel(table.phase()));
-            UUID actor = table.actor();
-            if (actor != null) {
-                if (text.length() > 0) {
-                    text.append("\n");
+            if (SHOWDOWN.equals(table.phase())) {
+                text.append(Messages.get("label.draw_showdown"));
+            } else if (DRAW.equals(table.phase())) {
+                text.append(Messages.get("label.draw_draw"));
+                UUID actor = table.actor();
+                if (actor != null) {
+                    text.append("\n").append(Messages.get("label.turn", "name", RpNames.of(actor)));
                 }
-                text.append(Messages.get("label.turn", "name", RpNames.of(actor)));
-                Street street = streets.get(table.getId());
-                int toCall = 0;
-                if (street != null) {
-                    toCall = Math.max(0, street.currentBet - streetContrib(table, actor));
+            } else {
+                text.append(Messages.get("label.draw_bet"));
+                UUID actor = table.actor();
+                if (actor != null) {
+                    text.append("\n").append(Messages.get("label.turn", "name", RpNames.of(actor)));
+                    Street street = streets.get(table.getId());
+                    int toCall = 0;
+                    if (street != null) {
+                        toCall = Math.max(0, street.currentBet - streetContrib(table, actor));
+                    }
+                    text.append("\n").append(Messages.get("label.draw_tocall", "n", String.valueOf(toCall)));
                 }
-                if (text.length() > 0) {
-                    text.append("\n");
-                }
-                text.append(Messages.get("label.holdem_tocall", "n", String.valueOf(toCall)));
             }
         }
         return text.toString();
@@ -305,6 +343,7 @@ public final class PokerGame implements Game {
             street.folded.remove(leaver);
             street.acted.remove(leaver);
             street.capped.remove(leaver);
+            street.drawn.remove(leaver);
         }
         table.actives().remove(leaver);
         if (leaver.equals(table.dealerId())) {
@@ -375,7 +414,7 @@ public final class PokerGame implements Game {
         return online;
     }
 
-    private static List<Player> holeQueue(Table table) {
+    private static List<Player> dealQueue(Table table) {
         List<UUID> seats = new ArrayList<>(table.actives());
         List<Player> queue = new ArrayList<>();
         if (seats.isEmpty()) {
@@ -385,7 +424,7 @@ public final class PokerGame implements Game {
         if (button < 0) {
             button = seats.size() - 1;
         }
-        for (int round = 0; round < 2; round++) {
+        for (int round = 0; round < 5; round++) {
             for (int step = 1; step <= seats.size(); step++) {
                 UUID id = seats.get((button + step) % seats.size());
                 Player player = Bukkit.getPlayer(id);
@@ -397,7 +436,7 @@ public final class PokerGame implements Game {
         return queue;
     }
 
-    private void dealHoles(Table table, List<Player> queue, int index) {
+    private void dealHands(Table table, List<Player> queue, int index) {
         if (table == null) {
             return;
         }
@@ -410,7 +449,7 @@ public final class PokerGame implements Game {
             return;
         }
         Player player = queue.get(index);
-        TableManager.get().dealToPlayer(still, player, 1, () -> dealHoles(still, queue, index + 1));
+        TableManager.get().dealToPlayer(still, player, 1, () -> dealHands(still, queue, index + 1));
     }
 
     private void startStreet(Table table) {
@@ -421,91 +460,6 @@ public final class PokerGame implements Game {
         streets.put(table.getId(), street);
         table.setActor(leftOfButton(table, street));
         TableManager.get().refreshLabel(table);
-    }
-
-    private static boolean bettingPhase(String phase) {
-        return PREFLOP.equals(phase) || FLOP.equals(phase) || TURN.equals(phase) || RIVER.equals(phase);
-    }
-
-    private static String streetLabel(String phase) {
-        if (FLOP.equals(phase)) {
-            return Messages.get("label.holdem_flop");
-        }
-        if (TURN.equals(phase)) {
-            return Messages.get("label.holdem_turn");
-        }
-        if (SHOWDOWN.equals(phase)) {
-            return Messages.get("label.holdem_showdown");
-        }
-        if (RIVER.equals(phase)) {
-            return Messages.get("label.holdem_river");
-        }
-        return Messages.get("label.holdem_preflop");
-    }
-
-    private void resumeBetting(Table table) {
-        Table still = table != null ? TableManager.get().table(table.getId()) : null;
-        if (still == null || !still.live()) {
-            return;
-        }
-        Street street = streets.get(still.getId());
-        if (street == null) {
-            return;
-        }
-        street.currentBet = 0;
-        street.acted.clear();
-        street.capped.clear();
-        still.setActor(leftOfButton(still, street));
-        TableManager.get().refreshLabel(still);
-    }
-
-    private void advanceBoard(Table table) {
-        if (table == null || !table.live()) {
-            return;
-        }
-        String phase = table.phase();
-        if (RIVER.equals(phase) || SHOWDOWN.equals(phase)) {
-            showdown(table);
-            return;
-        }
-        UUID tableId = table.getId();
-        int cards;
-        String nextPhase;
-        int nextStreet;
-        String announce;
-        if (PREFLOP.equals(phase)) {
-            nextPhase = FLOP;
-            nextStreet = 2;
-            cards = 3;
-            announce = "poker.flop";
-        } else if (FLOP.equals(phase)) {
-            nextPhase = TURN;
-            nextStreet = 3;
-            cards = 1;
-            announce = "poker.turn";
-        } else if (TURN.equals(phase)) {
-            nextPhase = RIVER;
-            nextStreet = 4;
-            cards = 1;
-            announce = "poker.river";
-        } else {
-            TableManager.get().refreshLabel(table);
-            return;
-        }
-        table.setPhase(nextPhase);
-        table.setStreet(nextStreet);
-        Street street = streets.get(table.getId());
-        if (street != null) {
-            street.currentBet = 0;
-            street.acted.clear();
-            street.capped.clear();
-        }
-        tellSeated(table, Messages.get(announce));
-        TableManager.get().refreshLabel(table);
-        TableManager.get().dealToTable(table, "board", cards, true, () -> {
-            Table still = TableManager.get().table(tableId);
-            resumeBetting(still);
-        });
     }
 
     private static UUID leftOfButton(Table table, Street street) {
@@ -524,218 +478,6 @@ public final class PokerGame implements Game {
             }
         }
         return null;
-    }
-
-    private void showdown(Table table) {
-        if (table == null || !table.live() || SHOWDOWN.equals(table.phase())) {
-            return;
-        }
-        table.setPhase(SHOWDOWN);
-        table.setActor(null);
-        TableManager manager = TableManager.get();
-        manager.refreshLabel(table);
-        tellSeated(table, Messages.get("poker.showdown"));
-        Street street = streets.get(table.getId());
-        List<UUID> live = street != null ? liveSeats(table, street) : new ArrayList<>(table.actives());
-        if (live.size() <= 1) {
-            foldWin(table, live.isEmpty() ? null : live.get(0));
-            return;
-        }
-        for (UUID id : live) {
-            Player player = Bukkit.getPlayer(id);
-            if (player != null && player.isOnline()) {
-                manager.publishHand(table, player);
-            }
-        }
-        payPots(table, live, boardCards(table), table.getGameId());
-    }
-
-    private static List<Card> boardCards(Table table) {
-        return cardsOf(table.tablePile("board"));
-    }
-
-    private void announceWinners(Table table, List<UUID> winners) {
-        if (winners.size() == 1) {
-            tellSeated(table, Messages.get("poker.win", "name", RpNames.of(winners.get(0))));
-            return;
-        }
-        List<String> names = new ArrayList<>();
-        for (UUID id : winners) {
-            names.add(RpNames.of(id));
-        }
-        tellSeated(table, Messages.get("poker.chop", "names", String.join(", ", names)));
-    }
-
-    private void payPots(Table table, List<UUID> live, List<Card> board, String gameId) {
-        TableManager manager = TableManager.get();
-        Map<UUID, Integer> invested = investedByOwner(table, manager);
-        TreeSet<Integer> levels = new TreeSet<>();
-        for (int put : invested.values()) {
-            if (put > 0) {
-                levels.add(put);
-            }
-        }
-        if (levels.isEmpty()) {
-            finishHand(table);
-            return;
-        }
-        IdentityHashMap<PotPile, UUID> dests = new IdentityHashMap<>();
-        UUID leftover = null;
-        List<UUID> liveOrder = seatOrderLeftOfButton(table, live);
-        if (!liveOrder.isEmpty()) {
-            leftover = liveOrder.get(0);
-        } else if (!live.isEmpty()) {
-            leftover = live.get(0);
-        }
-        int previous = 0;
-        for (int level : levels) {
-            int covered = 0;
-            for (int put : invested.values()) {
-                if (put >= level) {
-                    covered++;
-                }
-            }
-            int amount = (level - previous) * covered;
-            previous = level;
-            if (amount < 1) {
-                continue;
-            }
-            List<UUID> contestants = new ArrayList<>();
-            for (UUID id : live) {
-                if (invested.getOrDefault(id, 0) >= level) {
-                    contestants.add(id);
-                }
-            }
-            if (contestants.isEmpty()) {
-                continue;
-            }
-            List<UUID> winners = rankSeats(table, contestants, board, gameId);
-            if (winners.isEmpty()) {
-                continue;
-            }
-            leftover = winners.get(0);
-            announceWinners(table, winners);
-            assignEven(table, manager, dests, winners, amount);
-        }
-        if (leftover != null) {
-            for (PotPile pile : table.getPiles()) {
-                if (!manager.isTrayPile(table, pile) && pile.contribution() > 0) {
-                    dests.putIfAbsent(pile, leftover);
-                }
-            }
-        }
-        List<PayoutFlight> flights = new ArrayList<>();
-        for (Map.Entry<PotPile, UUID> entry : dests.entrySet()) {
-            flights.add(new PayoutFlight(entry.getKey(), entry.getValue()));
-        }
-        if (flights.isEmpty()) {
-            finishHand(table);
-            return;
-        }
-        UUID tableId = table.getId();
-        manager.flushPiles(table, flights, () -> {
-            Table still = TableManager.get().table(tableId);
-            if (still != null) {
-                finishHand(still);
-            }
-        });
-    }
-
-    private static Map<UUID, Integer> investedByOwner(Table table, TableManager manager) {
-        Map<UUID, Integer> invested = new HashMap<>();
-        for (PotPile pile : table.getPiles()) {
-            if (manager.isTrayPile(table, pile) || pile.ownerId() == null) {
-                continue;
-            }
-            invested.merge(pile.ownerId(), pile.contribution(), Integer::sum);
-        }
-        return invested;
-    }
-
-    private static List<UUID> rankSeats(Table table, List<UUID> contestants, List<Card> board, String gameId) {
-        if (contestants.size() == 1) {
-            return new ArrayList<>(contestants);
-        }
-        HoldemRank.Score best = HoldemRank.Score.none();
-        List<UUID> tied = new ArrayList<>();
-        for (UUID id : contestants) {
-            List<Card> cards = new ArrayList<>(board);
-            cards.addAll(cardsOf(table.handOf(id)));
-            HoldemRank.Score score = HoldemRank.best(gameId, cards);
-            if (tied.isEmpty() || score.compareTo(best) > 0) {
-                best = score;
-                tied.clear();
-                tied.add(id);
-            } else if (score.compareTo(best) == 0) {
-                tied.add(id);
-            }
-        }
-        return seatOrderLeftOfButton(table, tied);
-    }
-
-    private static void assignEven(Table table, TableManager manager, IdentityHashMap<PotPile, UUID> dests,
-            List<UUID> winners, int amount) {
-        if (amount < 1 || winners.isEmpty()) {
-            return;
-        }
-        int n = winners.size();
-        int share = amount / n;
-        int rem = amount % n;
-        for (UUID winner : winners) {
-            int need = share;
-            if (rem > 0) {
-                need++;
-                rem--;
-            }
-            if (need < 1) {
-                continue;
-            }
-            List<PotPile> chunk = manager.detachDenars(table, pile -> {
-                return !manager.isTrayPile(table, pile) && !dests.containsKey(pile);
-            }, need);
-            for (PotPile pile : chunk) {
-                dests.put(pile, winner);
-            }
-        }
-    }
-
-    private void finishHand(Table table) {
-        TableManager.get().endSession(table);
-        passButton(table);
-        TableManager.get().refreshLabel(table);
-    }
-
-    private static List<UUID> seatOrderLeftOfButton(Table table, List<UUID> include) {
-        List<UUID> ordered = new ArrayList<>();
-        List<UUID> seats = new ArrayList<>(table.actives());
-        if (seats.isEmpty() || include == null || include.isEmpty()) {
-            return ordered;
-        }
-        Set<UUID> want = new HashSet<>(include);
-        int button = seats.indexOf(table.dealerId());
-        if (button < 0) {
-            button = seats.size() - 1;
-        }
-        for (int step = 1; step <= seats.size(); step++) {
-            UUID id = seats.get((button + step) % seats.size());
-            if (want.contains(id)) {
-                ordered.add(id);
-            }
-        }
-        return ordered;
-    }
-
-    private static List<Card> cardsOf(List<HandCard> held) {
-        List<Card> cards = new ArrayList<>();
-        if (held == null) {
-            return cards;
-        }
-        for (HandCard card : held) {
-            if (card != null && card.card() != null) {
-                cards.add(card.card());
-            }
-        }
-        return cards;
     }
 
     private static int streetContrib(Table table, UUID owner) {
@@ -803,11 +545,17 @@ public final class PokerGame implements Game {
             foldWin(table, live.isEmpty() ? null : live.get(0));
             return;
         }
+        if (DRAW.equals(table.phase())) {
+            nextDrawActor(table, street, table.actor());
+            return;
+        }
         if (streetComplete(table, street)) {
-            table.setActor(null);
-            tellSeated(table, Messages.get("poker.street_done"));
-            TableManager.get().refreshLabel(table);
-            advanceBoard(table);
+            if (table.street() >= 2) {
+                showdown(table);
+                return;
+            }
+            tellSeated(table, Messages.get("draw.street_done"));
+            startDrawRound(table, street);
             return;
         }
         UUID actor = table.actor();
@@ -821,9 +569,308 @@ public final class PokerGame implements Game {
         TableManager.get().refreshLabel(table);
     }
 
+    private void startDrawRound(Table table, Street street) {
+        if (table == null || street == null || !table.live()) {
+            return;
+        }
+        street.drawn.clear();
+        table.setPhase(DRAW);
+        table.setActor(leftOfButtonLive(table, street));
+        TableManager.get().refreshLabel(table);
+    }
+
+    private void nextDrawActor(Table table, Street street, UUID from) {
+        if (table == null || street == null || !table.live()) {
+            return;
+        }
+        List<UUID> live = liveSeats(table, street);
+        if (live.size() <= 1) {
+            foldWin(table, live.isEmpty() ? null : live.get(0));
+            return;
+        }
+        if (allDrawn(live, street)) {
+            startStreetTwo(table, street);
+            return;
+        }
+        table.setActor(nextDrawLive(table, street, from));
+        TableManager.get().refreshLabel(table);
+    }
+
+    private void startStreetTwo(Table table, Street street) {
+        street.currentBet = 0;
+        street.acted.clear();
+        street.capped.clear();
+        street.drawn.clear();
+        table.setStreet(2);
+        table.setPhase(BET);
+        table.setActor(leftOfButton(table, street));
+        TableManager.get().refreshLabel(table);
+    }
+
+    private static boolean allDrawn(List<UUID> live, Street street) {
+        for (UUID id : live) {
+            if (!street.drawn.contains(id)) {
+                return false;
+            }
+        }
+        return !live.isEmpty();
+    }
+
+    private static UUID leftOfButtonLive(Table table, Street street) {
+        List<UUID> seats = new ArrayList<>(table.actives());
+        if (seats.isEmpty()) {
+            return null;
+        }
+        int button = seats.indexOf(table.dealerId());
+        if (button < 0) {
+            button = seats.size() - 1;
+        }
+        for (int step = 1; step <= seats.size(); step++) {
+            UUID id = seats.get((button + step) % seats.size());
+            if (street == null || !street.folded.contains(id)) {
+                return id;
+            }
+        }
+        return null;
+    }
+
+    private static UUID nextDrawLive(Table table, Street street, UUID from) {
+        List<UUID> seats = new ArrayList<>(table.actives());
+        if (seats.isEmpty()) {
+            return null;
+        }
+        int i = seats.indexOf(from);
+        for (int step = 1; step <= seats.size(); step++) {
+            UUID id = seats.get((i + step) % seats.size());
+            if (!street.folded.contains(id) && !street.drawn.contains(id)) {
+                return id;
+            }
+        }
+        return null;
+    }
+
+    private static boolean hasSelected(Table table, UUID id) {
+        List<HandCard> hand = table.getHands().get(id);
+        if (hand == null) {
+            return false;
+        }
+        for (HandCard held : hand) {
+            if (held.isSelected()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void showdown(Table table) {
+        if (table == null || !table.live() || SHOWDOWN.equals(table.phase())) {
+            return;
+        }
+        table.setPhase(SHOWDOWN);
+        table.setActor(null);
+        TableManager manager = TableManager.get();
+        manager.refreshLabel(table);
+        tellSeated(table, Messages.get("draw.showdown"));
+        Street street = streets.get(table.getId());
+        List<UUID> live = street != null ? liveSeats(table, street) : new ArrayList<>(table.actives());
+        if (live.size() <= 1) {
+            foldWin(table, live.isEmpty() ? null : live.get(0));
+            return;
+        }
+        for (UUID id : live) {
+            Player player = Bukkit.getPlayer(id);
+            if (player != null && player.isOnline()) {
+                manager.publishHand(table, player);
+            }
+        }
+        payPots(table, live, table.getGameId());
+    }
+
+    private void announceWinners(Table table, List<UUID> winners) {
+        if (winners.size() == 1) {
+            tellSeated(table, Messages.get("draw.win", "name", RpNames.of(winners.get(0))));
+            return;
+        }
+        List<String> names = new ArrayList<>();
+        for (UUID id : winners) {
+            names.add(RpNames.of(id));
+        }
+        tellSeated(table, Messages.get("draw.chop", "names", String.join(", ", names)));
+    }
+
+    private void payPots(Table table, List<UUID> live, String gameId) {
+        TableManager manager = TableManager.get();
+        Map<UUID, Integer> invested = investedByOwner(table, manager);
+        TreeSet<Integer> levels = new TreeSet<>();
+        for (int put : invested.values()) {
+            if (put > 0) {
+                levels.add(put);
+            }
+        }
+        if (levels.isEmpty()) {
+            finishHand(table);
+            return;
+        }
+        IdentityHashMap<PotPile, UUID> dests = new IdentityHashMap<>();
+        UUID leftover = null;
+        List<UUID> liveOrder = seatOrderLeftOfButton(table, live);
+        if (!liveOrder.isEmpty()) {
+            leftover = liveOrder.get(0);
+        } else if (!live.isEmpty()) {
+            leftover = live.get(0);
+        }
+        int previous = 0;
+        for (int level : levels) {
+            int covered = 0;
+            for (int put : invested.values()) {
+                if (put >= level) {
+                    covered++;
+                }
+            }
+            int amount = (level - previous) * covered;
+            previous = level;
+            if (amount < 1) {
+                continue;
+            }
+            List<UUID> contestants = new ArrayList<>();
+            for (UUID id : live) {
+                if (invested.getOrDefault(id, 0) >= level) {
+                    contestants.add(id);
+                }
+            }
+            if (contestants.isEmpty()) {
+                continue;
+            }
+            List<UUID> winners = rankSeats(table, contestants, gameId);
+            if (winners.isEmpty()) {
+                continue;
+            }
+            leftover = winners.get(0);
+            announceWinners(table, winners);
+            assignEven(table, manager, dests, winners, amount);
+        }
+        if (leftover != null) {
+            for (PotPile pile : table.getPiles()) {
+                if (!manager.isTrayPile(table, pile) && pile.contribution() > 0) {
+                    dests.putIfAbsent(pile, leftover);
+                }
+            }
+        }
+        List<PayoutFlight> flights = new ArrayList<>();
+        for (Map.Entry<PotPile, UUID> entry : dests.entrySet()) {
+            flights.add(new PayoutFlight(entry.getKey(), entry.getValue()));
+        }
+        if (flights.isEmpty()) {
+            finishHand(table);
+            return;
+        }
+        UUID tableId = table.getId();
+        manager.flushPiles(table, flights, () -> {
+            Table still = TableManager.get().table(tableId);
+            if (still != null) {
+                finishHand(still);
+            }
+        });
+    }
+
+    private static Map<UUID, Integer> investedByOwner(Table table, TableManager manager) {
+        Map<UUID, Integer> invested = new HashMap<>();
+        for (PotPile pile : table.getPiles()) {
+            if (manager.isTrayPile(table, pile) || pile.ownerId() == null) {
+                continue;
+            }
+            invested.merge(pile.ownerId(), pile.contribution(), Integer::sum);
+        }
+        return invested;
+    }
+
+    private static List<UUID> rankSeats(Table table, List<UUID> contestants, String gameId) {
+        if (contestants.size() == 1) {
+            return new ArrayList<>(contestants);
+        }
+        HoldemRank.Score best = HoldemRank.Score.none();
+        List<UUID> tied = new ArrayList<>();
+        for (UUID id : contestants) {
+            HoldemRank.Score score = HoldemRank.best(gameId, cardsOf(table.handOf(id)));
+            if (tied.isEmpty() || score.compareTo(best) > 0) {
+                best = score;
+                tied.clear();
+                tied.add(id);
+            } else if (score.compareTo(best) == 0) {
+                tied.add(id);
+            }
+        }
+        return seatOrderLeftOfButton(table, tied);
+    }
+
+    private static void assignEven(Table table, TableManager manager, IdentityHashMap<PotPile, UUID> dests,
+            List<UUID> winners, int amount) {
+        if (amount < 1 || winners.isEmpty()) {
+            return;
+        }
+        int n = winners.size();
+        int share = amount / n;
+        int remnant = amount % n;
+        for (UUID winner : winners) {
+            int need = share;
+            if (remnant > 0) {
+                need++;
+                remnant--;
+            }
+            if (need < 1) {
+                continue;
+            }
+            List<PotPile> chunk = manager.detachDenars(table, pile -> {
+                return !manager.isTrayPile(table, pile) && !dests.containsKey(pile);
+            }, need);
+            for (PotPile pile : chunk) {
+                dests.put(pile, winner);
+            }
+        }
+    }
+
+    private void finishHand(Table table) {
+        TableManager.get().endSession(table);
+        passButton(table);
+        TableManager.get().refreshLabel(table);
+    }
+
+    private static List<UUID> seatOrderLeftOfButton(Table table, List<UUID> include) {
+        List<UUID> ordered = new ArrayList<>();
+        List<UUID> seats = new ArrayList<>(table.actives());
+        if (seats.isEmpty() || include == null || include.isEmpty()) {
+            return ordered;
+        }
+        Set<UUID> want = new HashSet<>(include);
+        int button = seats.indexOf(table.dealerId());
+        if (button < 0) {
+            button = seats.size() - 1;
+        }
+        for (int step = 1; step <= seats.size(); step++) {
+            UUID id = seats.get((button + step) % seats.size());
+            if (want.contains(id)) {
+                ordered.add(id);
+            }
+        }
+        return ordered;
+    }
+
+    private static List<Card> cardsOf(List<HandCard> held) {
+        List<Card> cards = new ArrayList<>();
+        if (held == null) {
+            return cards;
+        }
+        for (HandCard card : held) {
+            if (card != null && card.card() != null) {
+                cards.add(card.card());
+            }
+        }
+        return cards;
+    }
+
     private void foldWin(Table table, UUID winner) {
         if (winner != null) {
-            tellSeated(table, Messages.get("poker.win_fold", "name", RpNames.of(winner)));
+            tellSeated(table, Messages.get("draw.win_fold", "name", RpNames.of(winner)));
         }
         TableManager.get().endSession(table);
         passButton(table);
@@ -835,12 +882,4 @@ public final class PokerGame implements Game {
             player.sendMessage(message);
         }
     }
-
-    @Override
-    public int denarsToMatch(Table table, Player player) {
-        return 0;
-    }
-
-    @Override
-    public void onStreetCommit(Table table, Player player, int streetValue, boolean folded) {}
 }
