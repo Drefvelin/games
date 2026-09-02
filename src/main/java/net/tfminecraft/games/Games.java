@@ -17,6 +17,7 @@ import net.tfminecraft.games.gui.TableOptionsGui;
 import net.tfminecraft.games.loader.CardLoader;
 import net.tfminecraft.games.loader.ConfigLoader;
 import net.tfminecraft.games.loader.GamesLoader;
+import net.tfminecraft.games.loader.HelpLoader;
 import net.tfminecraft.games.table.TableManager;
 
 /**
@@ -29,6 +30,7 @@ public class Games extends JavaPlugin {
     private final ConfigLoader configLoader = new ConfigLoader();
     private final GamesLoader gamesLoader = new GamesLoader();
     private final CardLoader cardLoader = new CardLoader();
+    private final HelpLoader helpLoader = new HelpLoader();
     private final CommandManager commandManager = new CommandManager();
     private final WagerCommand wagerCommand = new WagerCommand();
 
@@ -80,6 +82,8 @@ public class Games extends JavaPlugin {
         boolean ok = loadConfigs();
         if (ok) {
             TableManager.get().wipeHands();
+            // wager.show-chips may have flipped, so draw every table again.
+            TableManager.get().redrawAllChips();
         }
         return ok;
     }
@@ -90,6 +94,7 @@ public class Games extends JavaPlugin {
         Messages.load(new File(getDataFolder(), "messages.yml"));
         ok &= gamesLoader.loadSafe(new File(getDataFolder(), "games.yml"));
         ok &= cardLoader.loadSafe(new File(getDataFolder(), "cards.yml"));
+        ok &= helpLoader.loadSafe(new File(getDataFolder(), "help.yml"));
         if (ok) {
             getLogger().info("[Games] Configs loaded.");
         }
@@ -119,6 +124,7 @@ public class Games extends JavaPlugin {
                     + " hand.sit-range=" + Cache.handSitRange
                     + " hand.sit-edge=" + Cache.handSitEdge
                     + " hand.sit-inset=" + Cache.handSitInset
+                    + " hand.split-group-gap=" + Cache.handSplitGroupGap
                     + " hand.reveal-stagger=" + Cache.handRevealStagger
                     + " hand.reveal-flip=" + Cache.handRevealFlip
                     + " hand.deal-ticks=" + Cache.handDealTicks
@@ -138,6 +144,8 @@ public class Games extends JavaPlugin {
                     + " wager.vote-seconds=" + Cache.wagerVoteSeconds
                     + " wager.place-seconds=" + Cache.wagerPlaceSeconds
                     + " wager.payout-ticks=" + Cache.wagerPayoutTicks
+                    + " wager.audit-log=" + Cache.wagerAuditLog
+                    + " wager.show-chips=" + Cache.wagerShowChips
                     + " table.discard-offset=" + Cache.tableDiscardOffset
                     + " table.board-offset=" + Cache.tableBoardOffset
                     + " table.recycle-ticks=" + Cache.tableRecycleTicks
@@ -170,7 +178,8 @@ public class Games extends JavaPlugin {
             "config.yml",
             "messages.yml",
             "cards.yml",
-            "games.yml"
+            "games.yml",
+            "help.yml"
         };
         for (String path : defaultFiles) {
             copyResourceIfMissing(path);

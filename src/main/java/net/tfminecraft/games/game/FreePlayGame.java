@@ -2,10 +2,8 @@ package net.tfminecraft.games.game;
 
 import org.bukkit.entity.Player;
 
-import net.tfminecraft.games.Messages;
 import net.tfminecraft.games.table.Table;
 import net.tfminecraft.games.table.TableManager;
-import net.tfminecraft.games.wager.PotPile;
 
 /**
  * Shoe, hands, and felt only. No 21, streets, or dealer.
@@ -32,11 +30,7 @@ public final class FreePlayGame implements Game {
         if (table == null) {
             return "";
         }
-        int total = 0;
-        for (PotPile pile : table.getPiles()) {
-            total += pile.contribution();
-        }
-        return Messages.get("label.pot", "n", String.valueOf(total));
+        return PotLabel.lines(table);
     }
 
     @Override

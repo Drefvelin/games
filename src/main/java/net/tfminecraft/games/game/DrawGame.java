@@ -3,7 +3,6 @@ package net.tfminecraft.games.game;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -21,7 +20,7 @@ import net.tfminecraft.games.table.PayoutFlight;
 import net.tfminecraft.games.table.Table;
 import net.tfminecraft.games.table.TableManager;
 import net.tfminecraft.games.voice.RpNames;
-import net.tfminecraft.games.wager.PotPile;
+import net.tfminecraft.games.wager.WagerEngine;
 
 /**
  * Five-Draw seats, deal, draw round, and showdown.
@@ -292,6 +291,13 @@ public final class DrawGame implements Game {
                 }
             }
         }
+        String pot = PotLabel.lines(table);
+        if (!pot.isEmpty()) {
+            if (text.length() > 0) {
+                text.append("\n");
+            }
+            text.append(pot);
+        }
         return text.toString();
     }
 
@@ -343,7 +349,7 @@ public final class DrawGame implements Game {
             street.folded.remove(leaver);
             street.acted.remove(leaver);
             street.capped.remove(leaver);
-            street.drawn.remove(leaver);
+            street.drawn.add(leaver);
         }
         table.actives().remove(leaver);
         if (leaver.equals(table.dealerId())) {
@@ -351,12 +357,9 @@ public final class DrawGame implements Game {
         }
         TableManager.get().refreshLabel(table);
         int streetId = table.street();
-        IdentityHashMap<PotPile, UUID> dests = new IdentityHashMap<>();
-        for (PotPile pile : table.getPiles()) {
-            if (leaver.equals(pile.ownerId()) && pile.streetId() == streetId) {
-                dests.put(pile, leaver);
-            }
-        }
+        List<PayoutFlight> flights = new ArrayList<>();
+        // A leaver gets this street's bet back; earlier streets stay in the pot.
+        WagerEngine.get().refundStreet(table, leaver, streetId, flights, "player left");
         UUID rest = null;
         if (table.actives().size() == 1) {
             rest = table.actives().iterator().next();
@@ -364,13 +367,8 @@ public final class DrawGame implements Game {
             rest = leaver;
         }
         if (rest != null) {
-            for (PotPile pile : table.getPiles()) {
-                dests.putIfAbsent(pile, rest);
-            }
-        }
-        List<PayoutFlight> flights = new ArrayList<>();
-        for (Map.Entry<PotPile, UUID> entry : dests.entrySet()) {
-            flights.add(new PayoutFlight(entry.getKey(), entry.getValue()));
+            // Nobody left to play for it, so the pot goes to the last seat.
+            WagerEngine.get().sweepPot(table, Bukkit.getPlayer(rest), flights, "hand abandoned");
         }
         boolean stop = live && table.actives().size() < 2;
         manager.flushPiles(table, flights, () -> {
@@ -484,14 +482,7 @@ public final class DrawGame implements Game {
         if (table == null || owner == null) {
             return 0;
         }
-        int street = table.street();
-        int value = 0;
-        for (PotPile pile : table.getPiles()) {
-            if (owner.equals(pile.ownerId()) && pile.streetId() == street) {
-                value += pile.contribution();
-            }
-        }
-        return value;
+        return WagerEngine.get().owned(table, owner, table.street());
     }
 
     private static List<UUID> liveSeats(Table table, Street street) {
@@ -683,6 +674,9 @@ public final class DrawGame implements Game {
                 manager.publishHand(table, player);
             }
         }
+        for (String line : HandTalk.bestHand(table.getGameId(), live, id -> cardsOf(table.handOf(id)))) {
+            tellSeated(table, line);
+        }
         payPots(table, live, table.getGameId());
     }
 
@@ -711,7 +705,7 @@ public final class DrawGame implements Game {
             finishHand(table);
             return;
         }
-        IdentityHashMap<PotPile, UUID> dests = new IdentityHashMap<>();
+        List<PayoutFlight> flights = new ArrayList<>();
         UUID leftover = null;
         List<UUID> liveOrder = seatOrderLeftOfButton(table, live);
         if (!liveOrder.isEmpty()) {
@@ -747,22 +741,11 @@ public final class DrawGame implements Game {
             }
             leftover = winners.get(0);
             announceWinners(table, winners);
-            assignEven(table, manager, dests, winners, amount);
+            payEven(table, manager, flights, winners, amount);
         }
+        // Whatever the levels could not split in whole coins goes to one seat.
         if (leftover != null) {
-            for (PotPile pile : table.getPiles()) {
-                if (!manager.isTrayPile(table, pile) && pile.contribution() > 0) {
-                    dests.putIfAbsent(pile, leftover);
-                }
-            }
-        }
-        List<PayoutFlight> flights = new ArrayList<>();
-        for (Map.Entry<PotPile, UUID> entry : dests.entrySet()) {
-            flights.add(new PayoutFlight(entry.getKey(), entry.getValue()));
-        }
-        if (flights.isEmpty()) {
-            finishHand(table);
-            return;
+            WagerEngine.get().sweepPot(table, Bukkit.getPlayer(leftover), flights, "pot remainder");
         }
         UUID tableId = table.getId();
         manager.flushPiles(table, flights, () -> {
@@ -774,14 +757,7 @@ public final class DrawGame implements Game {
     }
 
     private static Map<UUID, Integer> investedByOwner(Table table, TableManager manager) {
-        Map<UUID, Integer> invested = new HashMap<>();
-        for (PotPile pile : table.getPiles()) {
-            if (manager.isTrayPile(table, pile) || pile.ownerId() == null) {
-                continue;
-            }
-            invested.merge(pile.ownerId(), pile.contribution(), Integer::sum);
-        }
-        return invested;
+        return WagerEngine.get().totalsExcept(table, table.getId());
     }
 
     private static List<UUID> rankSeats(Table table, List<UUID> contestants, String gameId) {
@@ -803,7 +779,8 @@ public final class DrawGame implements Game {
         return seatOrderLeftOfButton(table, tied);
     }
 
-    private static void assignEven(Table table, TableManager manager, IdentityHashMap<PotPile, UUID> dests,
+    /** Split one pot level between winners, as evenly as the coins on the felt allow. */
+    private static void payEven(Table table, TableManager manager, List<PayoutFlight> flights,
             List<UUID> winners, int amount) {
         if (amount < 1 || winners.isEmpty()) {
             return;
@@ -820,12 +797,7 @@ public final class DrawGame implements Game {
             if (need < 1) {
                 continue;
             }
-            List<PotPile> chunk = manager.detachDenars(table, pile -> {
-                return !manager.isTrayPile(table, pile) && !dests.containsKey(pile);
-            }, need);
-            for (PotPile pile : chunk) {
-                dests.put(pile, winner);
-            }
+            WagerEngine.get().payFromPot(table, Bukkit.getPlayer(winner), need, flights, "pot");
         }
     }
 
@@ -868,13 +840,27 @@ public final class DrawGame implements Game {
         return cards;
     }
 
+    /** Everyone else folded, so the whole pot is the last player's. */
     private void foldWin(Table table, UUID winner) {
         if (winner != null) {
             tellSeated(table, Messages.get("draw.win_fold", "name", RpNames.of(winner)));
         }
-        TableManager.get().endSession(table);
-        passButton(table);
-        TableManager.get().refreshLabel(table);
+        TableManager manager = TableManager.get();
+        List<PayoutFlight> flights = new ArrayList<>();
+        Player dest = winner != null ? Bukkit.getPlayer(winner) : null;
+        if (dest != null) {
+            WagerEngine.get().sweepPot(table, dest, flights, "fold win");
+        } else {
+            // With nobody left to win it, every stake goes back where it came from.
+            WagerEngine.get().returnStakes(table, flights, "hand abandoned");
+        }
+        UUID tableId = table.getId();
+        manager.flushPiles(table, flights, () -> {
+            Table still = TableManager.get().table(tableId);
+            if (still != null) {
+                finishHand(still);
+            }
+        });
     }
 
     private static void tellSeated(Table table, String message) {

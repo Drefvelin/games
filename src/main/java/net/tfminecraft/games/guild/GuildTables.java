@@ -32,6 +32,19 @@ public final class GuildTables {
         return house != null && !house.staffMint();
     }
 
+    /**
+     * True when this table's house money comes from something other than a person: the staff mint,
+     * or the bank of the guild that owns it. That is a different question from who turns the cards,
+     * so a guild table is backed whether or not somebody is stood at the shoe. A table with no
+     * guild is stocked by whoever deals it, out of their own pocket.
+     */
+    public static boolean houseBacked(Table table) {
+        if (table == null) {
+            return false;
+        }
+        return table.staffMint() || (table.ownerGuildId() != null && !table.ownerGuildId().isBlank());
+    }
+
     public static String guildId(Player player) {
         if (player == null) {
             return null;
@@ -211,63 +224,8 @@ public final class GuildTables {
         }
     }
 
-    public static boolean tryWithdraw(String guildId, int denars) {
-        if (denars < 1) {
-            return true;
-        }
-        try {
-            Guild guild = guild(guildId);
-            if (guild == null || guild.isBankrupt()) {
-                return false;
-            }
-            Bank bank = guild.getBank();
-            if (bank == null || bank.getWealth() == null || bank.getWealth() < denars) {
-                return false;
-            }
-            bank.withdraw((double) denars);
-            return true;
-        } catch (RuntimeException | LinkageError ex) {
-            warn(ex);
-            return false;
-        }
-    }
-
-    public static boolean guildExists(String guildId) {
-        try {
-            return guild(guildId) != null;
-        } catch (RuntimeException | LinkageError ex) {
-            warn(ex);
-            return false;
-        }
-    }
-
-    /**
-     * True if the amount was banked (or there was nothing to bank). False if the guild or bank is gone.
-     */
-    public static boolean tryDeposit(String guildId, int denars) {
-        if (denars < 1) {
-            return true;
-        }
-        try {
-            Guild guild = guild(guildId);
-            if (guild == null) {
-                return false;
-            }
-            Bank bank = guild.getBank();
-            if (bank == null) {
-                return false;
-            }
-            bank.deposit((double) denars);
-            return true;
-        } catch (RuntimeException | LinkageError ex) {
-            warn(ex);
-            return false;
-        }
-    }
-
-    public static void deposit(String guildId, int denars) {
-        tryDeposit(guildId, denars);
-    }
+    // Moving guild money lives in the wager package, behind BankAccount, so a withdrawal cannot
+    // happen without the matching leg on the felt. See net.tfminecraft.games.wager.GuildBank.
 
     private static Guild guild(String guildId) {
         if (guildId == null || guildId.isBlank() || !sfReady()) {

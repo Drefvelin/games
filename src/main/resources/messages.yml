@@ -7,6 +7,11 @@ admin:
   usage: "#aaaaaaUsage: /games reload #555555| #aaaaaa/games deck test [set] #555555| #aaaaaa/games display test #555555| #aaaaaa/games place [poker|draw|blackjack|freeplay] #555555| #aaaaaa/games payout [player] #555555| #aaaaaa/games session start #555555| #aaaaaa/games session stop #555555| #aaaaaa/games deal [n] #555555| #aaaaaa/games deal table <board|dealer> [n] [back] #555555| #aaaaaa/games bet min <n> #555555| #aaaaaa/games bet max <n> #555555| #aaaaaa/games bet open #555555| #aaaaaa/games bet close #555555| #aaaaaa/games bet hit #555555| #aaaaaa/games bet stand #555555| #aaaaaa/games bet double #555555| #aaaaaa/games bet split"
   unknown_player: "#ff5555Unknown or offline player: {name}"
 
+help:
+  hint: "#aaaaaaNew here? Type #55ff55/games help #aaaaaafor the rules."
+  player_only: "#ff5555Only players can read the rule books."
+  unknown: "#ff5555No book for that. Try: {games}"
+
 deck:
   usage: "#aaaaaaUsage: /games deck test [set]"
   unknown_set: "#ff5555Unknown or empty card set: {set}"
@@ -90,6 +95,10 @@ hand:
   returned: "#aaaaaaYour cards went to the discard pile."
   returned_selected: "#aaaaaaSelected cards went to the discard pile."
   locked: "#ff5555The shoe is locked while a session is live."
+  best: "#ffaa00Best hand: #ffffff{name}"
+  best_cards: "#aaaaaa{cards}"
+  card: "{rank} #aaaaaaof {suit}"
+  card_join: "#aaaaaa, "
 
 poker:
   need_players: "#ff5555Need two seated players to deal."
@@ -156,6 +165,7 @@ wager:
   paying: "#ff5555The pot is already paying out."
   paid: "#55ff55The pot went to {player}."
   no_bet_zone: "#ff5555Too close to the shoe or house tray."
+  tray_is_funded: "#ff5555The house tray is stocked from the guild bank. Keep your own coins."
 
 dealer:
   claimed: "#55ff55You are the dealer at this table."
@@ -199,7 +209,9 @@ bet:
   lose: "#ff5555The house wins."
   owe: "#ff5555House short {amount} denars. Paid from the table."
   bank_short: "#ff5555The house bank cannot cover that bet."
+  house_short: "#ff5555The house cannot cover a full round of splits and doubles. Bets returned."
   need_chips: "#ff5555You need an equal extra bet in your inventory."
+  no_change: "#ff5555Your coins cannot make exactly {amount}. Best you can pay is {best}."
   no_double: "#ff5555You cannot double this hand."
   no_split: "#ff5555You cannot split this hand."
   doubled: "#55ff55Doubled."
@@ -233,9 +245,11 @@ label:
   box: "#aaaaaa{name} {stake}"
   action: "#aaaaaaAction {total}"
   pot: "#aaaaaaPot {n}"
+  pot_seat: "#aaaaaa{name} #ffd700{n}"
   total: "#aaaaaa{n}"
   total_hole: "#aaaaaa{up} + ?"
   total_soft: "#aaaaaa{hard}/{soft}"
   total_bust: "#ff5555Bust"
   tray_total: "#aaaaaa{n}"
+  stake: "#ffd700{n}"
   no_slots: "#ff5555No auto slots"

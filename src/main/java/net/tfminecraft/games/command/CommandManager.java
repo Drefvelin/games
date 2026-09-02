@@ -31,6 +31,7 @@ import net.tfminecraft.games.display.ProtocolLibBridge;
 import net.tfminecraft.games.display.WorldAnchors;
 import net.tfminecraft.games.gui.GameSelectGui;
 import net.tfminecraft.games.gui.TableOptionsGui;
+import net.tfminecraft.games.help.HelpBook;
 import net.tfminecraft.games.loader.CardLoader;
 import net.tfminecraft.games.game.BlackjackGame;
 import net.tfminecraft.games.game.Game;
@@ -56,8 +57,19 @@ public class CommandManager implements CommandExecutor, TabCompleter {
                 sender.sendMessage(Messages.get("bet.usage"));
                 return true;
             }
+            if (sender.hasPermission("games.help")) {
+                sender.sendMessage(Messages.get("help.hint"));
+                return true;
+            }
             sender.sendMessage(Messages.get("admin.no_permission"));
             return true;
+        }
+        if (args[0].equalsIgnoreCase("help")) {
+            if (!sender.hasPermission("games.help")) {
+                sender.sendMessage(Messages.get("admin.no_permission"));
+                return true;
+            }
+            return handleHelp(sender, args);
         }
         if (args[0].equalsIgnoreCase("bet")) {
             if (!sender.hasPermission("games.bet")) {
@@ -95,6 +107,36 @@ public class CommandManager implements CommandExecutor, TabCompleter {
                 sender.sendMessage(Messages.get("admin.usage"));
                 return true;
         }
+    }
+
+    private boolean handleHelp(CommandSender sender, String[] args) {
+        if (!(sender instanceof Player player)) {
+            sender.sendMessage(Messages.get("help.player_only"));
+            return true;
+        }
+        String id = args.length > 1 ? args[1] : "index";
+        HelpBook book = Cache.helpBook(id);
+        if (book == null || book.isEmpty()) {
+            player.sendMessage(Messages.get("help.unknown", "games", helpIds()));
+            return true;
+        }
+        book.openFor(player);
+        return true;
+    }
+
+    /** The books somebody can actually ask for, minus the index they get by default. */
+    private static List<String> helpBookIds() {
+        List<String> out = new ArrayList<>();
+        for (String id : Cache.helpBooks.keySet()) {
+            if (!"index".equals(id)) {
+                out.add(id);
+            }
+        }
+        return out;
+    }
+
+    private static String helpIds() {
+        return String.join(", ", helpBookIds());
     }
 
     private boolean handleDeck(CommandSender sender, String[] args) {
@@ -474,11 +516,15 @@ public class CommandManager implements CommandExecutor, TabCompleter {
         }
         boolean admin = sender.hasPermission("games.admin");
         boolean bet = sender.hasPermission("games.bet");
-        if (!admin && !bet) {
+        boolean help = sender.hasPermission("games.help");
+        if (!admin && !bet && !help) {
             return Collections.emptyList();
         }
         if (args.length == 1) {
             List<String> first = new ArrayList<>();
+            if (help) {
+                first.add("help");
+            }
             if (bet) {
                 first.add("bet");
             }
@@ -486,6 +532,9 @@ public class CommandManager implements CommandExecutor, TabCompleter {
                 first.addAll(List.of("reload", "deck", "display", "place", "payout", "session", "deal"));
             }
             return prefix(first, args[0]);
+        }
+        if (args.length == 2 && args[0].equalsIgnoreCase("help") && help) {
+            return prefix(helpBookIds(), args[1]);
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("bet") && bet) {
             return prefix(List.of("min", "max", "open", "close", "hit", "stand", "double", "split",

@@ -16,6 +16,7 @@ All paths under `plugins/Games/` on the server.
 | `messages.yml` | Player-facing chat strings |
 | `cards.yml` | Card catalog and named sets (`french_54`, `french_52`). Schema only until Batch 2/3 |
 | `games.yml` | Per-game rules, layout, blackjack min/max / auto-dealer defaults (Phase 2). Live auto/mint/shuffle live on the table ([GUILD_TABLES.md](GUILD_TABLES.md)) |
+| `help.yml` | The rule books `/games help` opens, one section per book, pages written by hand |
 | `Data/tables/` | Gson for placed tables (Batch 5) |
 
 ItemsAdder pack lives in the repo at `games/ItemsAdder/tfmc_games/` (Batch 2). Namespace: `tfmc_games`.
@@ -95,6 +96,7 @@ Ace file and IA id is `_1` or `1`, not 14. Ace-high ranking is a poker flag, not
 
 | Command | Permission | Batch |
 |---------|------------|-------|
+| `/games help [game]` | `games.help` (default true) | Opens a rule book from `help.yml`. No game id opens the index |
 | `/games reload` | `games.admin.reload` | 1 |
 | `/games place` | `games.admin` | 5 (admin, no deck) |
 | `/games bet ...` | `games.bet` | Phase 2 blackjack |

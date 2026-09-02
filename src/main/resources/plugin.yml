@@ -9,13 +9,16 @@ softdepend: [DenarEconomy, RPCharacters, SimpleFactions]
 commands:
   games:
     description: Tabletop games commands
-    usage: /games <bet|reload|deck|display|place|payout>
+    usage: /games <help|bet|reload|deck|display|place|payout>
   wager:
     description: Propose loot at a table or vote on a wager
     usage: /wager <amount|accept|decline>
     permission: games.wager
 
 permissions:
+  games.help:
+    description: Allows /games help to open the rule books
+    default: true
   games.wager:
     description: Allows /wager at a table
     default: true

@@ -94,6 +94,10 @@ blackjack:
   min-bet: 10
   max-bet: 1000
   max-boxes: 6
+  # Hands one box may split into. 4 is three resplits, the usual strip rule.
+  max-hands-per-box: 4
+  # Usual rule is false: a split pair of aces cannot be split again.
+  resplit-aces: false
   bet-seconds: 10
   result-delay-ticks: 8
   round-end-seconds: 10

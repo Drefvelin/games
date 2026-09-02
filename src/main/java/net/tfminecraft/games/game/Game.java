@@ -90,6 +90,14 @@ public interface Game {
 
     default void onTableRemoved(Table table) {}
 
+    /**
+     * Human dealer walked off or quit. Idle tables refresh the claim label.
+     * Live games that need a dealer click should continue without them.
+     */
+    default void onDealerGone(Table table) {
+        onTableReady(table);
+    }
+
     default void onChipIn(Table table, Player player) {}
 
     default void onChipIn(Table table, Player player, int denars, ItemStack item) {

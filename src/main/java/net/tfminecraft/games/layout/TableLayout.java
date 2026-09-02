@@ -72,6 +72,8 @@ public final class TableLayout {
     private final int maxBoxes;
     private final int smallBlind;
     private final int bigBlind;
+    private final int maxHandsPerBox;
+    private final boolean resplitAces;
 
     public TableLayout(String cardSet, String label, String icon, double leaveDistance,
             Map<String, PileSlot> piles, FeltRing ring, FeltBox box, PileSlot stand, double noBetRadius) {
@@ -123,14 +125,14 @@ public final class TableLayout {
             int maxBoxes) {
         this(cardSet, label, icon, leaveDistance, piles, ring, box, stand, noBetRadius, dealerHitsSoft17,
                 autoDealer, minBet, maxBet, betSeconds, voice, betZone, resultDelayTicks, roundEndSeconds, chipFx,
-                maxBoxes, 0, 0);
+                maxBoxes, 0, 0, 4, false);
     }
 
     public TableLayout(String cardSet, String label, String icon, double leaveDistance,
             Map<String, PileSlot> piles, FeltRing ring, FeltBox box, PileSlot stand, double noBetRadius,
             boolean dealerHitsSoft17, boolean autoDealer, int minBet, int maxBet, int betSeconds,
             VoiceLines voice, BetZone betZone, int resultDelayTicks, int roundEndSeconds, SoundFx chipFx,
-            int maxBoxes, int smallBlind, int bigBlind) {
+            int maxBoxes, int smallBlind, int bigBlind, int maxHandsPerBox, boolean resplitAces) {
         this.cardSet = cardSet;
         this.label = label;
         this.icon = icon;
@@ -153,6 +155,8 @@ public final class TableLayout {
         this.maxBoxes = Math.max(0, maxBoxes);
         this.smallBlind = smallBlind > 0 ? Math.max(1, smallBlind) : 0;
         this.bigBlind = bigBlind > 0 ? Math.max(1, bigBlind) : 0;
+        this.maxHandsPerBox = Math.max(1, maxHandsPerBox);
+        this.resplitAces = resplitAces;
     }
 
     public String cardSet() {
@@ -244,6 +248,16 @@ public final class TableLayout {
     /** 0 means no blinds line. */
     public int bigBlind() {
         return bigBlind;
+    }
+
+    /** How many hands one player box may hold. 4 is three resplits, the usual strip rule. */
+    public int maxHandsPerBox() {
+        return maxHandsPerBox;
+    }
+
+    /** False is the usual rule: a split pair of aces cannot be split again. */
+    public boolean resplitAces() {
+        return resplitAces;
     }
 
     public Location standLocation(Table table) {

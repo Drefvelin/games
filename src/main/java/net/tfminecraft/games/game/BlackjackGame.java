@@ -3,9 +3,8 @@ package net.tfminecraft.games.game;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.HashSet;
-import java.util.IdentityHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -34,7 +33,12 @@ import net.tfminecraft.games.table.Table;
 import net.tfminecraft.games.table.TableManager;
 import net.tfminecraft.games.voice.RpNames;
 import net.tfminecraft.games.voice.RpVoice;
-import net.tfminecraft.games.wager.PotPile;
+import net.tfminecraft.games.wager.Accounts;
+import net.tfminecraft.games.wager.MoneyAccount;
+import net.tfminecraft.games.wager.MoneyLog;
+import net.tfminecraft.games.wager.MoneyTx;
+import net.tfminecraft.games.wager.TxResult;
+import net.tfminecraft.games.wager.WagerEngine;
 
 /**
  * Layout, claim, deal, 21, double/split, and settle. Engines stay dumb.
@@ -47,14 +51,31 @@ public final class BlackjackGame implements Game {
     public static final String DEALER = "dealer";
     public static final String SETTLE = "settle";
 
+    /** Slots are parked above this while a box is being renumbered, so shifts cannot collide. */
+    private static final int SLOT_PARK = 100;
+
     private final Map<UUID, List<BjHand>> rounds = new HashMap<>();
     private final Map<UUID, BukkitTask> betTimers = new HashMap<>();
     private final Map<UUID, BukkitTask> lingerTimers = new HashMap<>();
     private final Map<UUID, Map<String, UUID>> pileHolos = new HashMap<>();
     private final Map<UUID, UUID> trayHolos = new HashMap<>();
 
+    /**
+     * Auto dealing is the house setting minus any human at the shoe. Claiming the shoe never
+     * clears the setting, so unsetting or leaving hands the table straight back to auto.
+     */
     static boolean auto(Table table) {
-        return table != null && table.autoDealer();
+        return table != null && table.autoDealer() && table.dealerId() == null;
+    }
+
+    /**
+     * Where the house money comes from, which is a separate question from who turns the cards.
+     * A guild table is bank funded even with a human at the shoe, because a non-member cannot
+     * deal it, so the tray is the guild's float and its winnings are the guild's. Only a table
+     * with no guild behind it is stocked by its dealer.
+     */
+    private static boolean houseFunded(Table table) {
+        return GuildTables.houseBacked(table);
     }
 
     private static void speak(Table table, Player player, String key) {
@@ -87,7 +108,8 @@ public final class BlackjackGame implements Game {
                 player.sendMessage(Messages.get("dealer.denied"));
                 return true;
             }
-            table.setAutoDealer(false);
+            // The float in the tray belongs to the guild, not to whoever takes the shoe.
+            TableManager.get().bankAutoTray(table);
             table.setDealerId(player.getUniqueId());
             TableManager.get().persistHouseChange(table);
             player.sendMessage(Messages.get("dealer.takeover"));
@@ -230,13 +252,7 @@ public final class BlackjackGame implements Game {
         if (table == null) {
             return;
         }
-        TableManager manager = TableManager.get();
-        int total = 0;
-        for (PotPile pile : table.getPiles()) {
-            if (manager.isTrayPile(table, pile)) {
-                total += pile.contribution();
-            }
-        }
+        int total = trayTotal(table);
         UUID id = trayHolos.get(table.getId());
         if (total < 1) {
             WorldAnchors.remove(id);
@@ -364,7 +380,7 @@ public final class BlackjackGame implements Game {
         List<BjHand> hands = new ArrayList<>();
         TableManager manager = TableManager.get();
         for (UUID box : table.boxes()) {
-            hands.add(new BjHand(box, 0, manager.ownedDenars(table, box)));
+            hands.add(new BjHand(box, hands.size(), 0, manager.ownedDenars(table, box)));
         }
         rounds.put(table.getId(), hands);
         TableManager.get().refreshLabel(table);
@@ -392,13 +408,24 @@ public final class BlackjackGame implements Game {
         cancelLinger(table);
         cancelBetTimer(table);
         clearPileHolos(table);
+        // Covers both exits: a settled round, and one abandoned when every box walked away.
+        drainAutoTray(table);
         prepareIdle(table);
         syncTrayHolo(table);
     }
 
     @Override
     public void onChipIn(Table table, Player player, int denars, ItemStack item) {
-        if (!coverAutoTray(table, player, denars, item)) {
+        if (!coverAutoTray(table, item)) {
+            // The house cannot back this bet, so it goes back rather than sitting on the felt
+            // looking covered. The chip that just landed is its own coin, so this is exact.
+            if (player != null && denars > 0) {
+                List<PayoutFlight> flights = new ArrayList<>();
+                WagerEngine.get().refund(table, player.getUniqueId(), player, denars, flights,
+                        "bet not covered");
+                TableManager.get().flushPiles(table, flights, null);
+                player.sendMessage(Messages.get("bet.bank_short"));
+            }
             return;
         }
         onChipIn(table, player);
@@ -434,50 +461,87 @@ public final class BlackjackGame implements Game {
             peelAutoTray(table, felt);
         }
         onChipIn(table, player);
+        skipGone(table, player);
     }
 
-    private static boolean coverAutoTray(Table table, Player player, int denars, ItemStack item) {
-        if (!auto(table) || table == null) {
+    @Override
+    public void onDealerGone(Table table) {
+        if (table == null || !table.live()) {
+            onTableReady(table);
+            return;
+        }
+        continueWithout(table, null, true);
+    }
+
+    private void skipGone(Table table, Player player) {
+        if (table == null || player == null || !table.live()) {
+            return;
+        }
+        continueWithout(table, player.getUniqueId(), player.getUniqueId().equals(table.dealerId()));
+    }
+
+    private void continueWithout(Table table, UUID gone, boolean dealerLeft) {
+        if (table == null || !table.live()) {
+            return;
+        }
+        boolean currentBox = false;
+        if (gone != null) {
+            int idx = table.boxes().indexOf(gone);
+            currentBox = idx >= 0 && idx == table.boxIndex();
+            if (idx >= 0) {
+                table.boxes().remove(idx);
+                if (idx < table.boxIndex()) {
+                    table.setBoxIndex(table.boxIndex() - 1);
+                }
+            }
+        }
+        String phase = table.phase();
+        if (table.boxes().isEmpty() && (WAIT_DEAL.equals(phase) || DEAL.equals(phase) || PLAY.equals(phase))) {
+            TableManager.get().endSession(table);
+            return;
+        }
+        if (WAIT_DEAL.equals(phase) && (dealerLeft || table.dealerId() == null)) {
+            startDeal(table);
+            return;
+        }
+        if (PLAY.equals(phase) && (currentBox || (gone != null && gone.equals(table.actor())))) {
+            table.setActor(null);
+            table.setHandIndex(0);
+            advancePlay(table);
+        }
+    }
+
+    /**
+     * Top the tray up so it can pay every bet on the felt. Says whether the house is good for
+     * the action, and never touches the bet that prompted it: the caller decides what to do about
+     * a shortfall while its own stake is still safely where the player put it.
+     */
+    private static boolean coverAutoTray(Table table, ItemStack item) {
+        if (table == null || !houseFunded(table)) {
             return true;
         }
-        TableLayout layout = Cache.layoutOf(table.getGameId());
-        Location tray = layout != null ? layout.trayLocation(table) : null;
         int need = Math.max(0, actionTotal(table) - trayTotal(table));
         if (need < 1) {
             return true;
         }
-        if (table.staffMint()) {
-            if (denars < 1 || item == null || tray == null) {
-                return true;
-            }
-            TableManager.get().spawnStoredPiles(table, table.getId(), item, need, tray);
+        TableManager manager = TableManager.get();
+        ItemStack template = manager.chipUnitDenars(item) > 0 ? item : houseTemplate(table, null);
+        int unit = manager.chipUnitDenars(template);
+        // Nothing here the house could pay in, such as a loot wager on an empty table. The round
+        // reserve at closeBets is the real gate, and it refunds everyone if the bank is short.
+        if (unit < 1) {
             return true;
         }
-        if (denars < 1 || item == null || tray == null
-                || !GuildTables.tryWithdraw(table.ownerGuildId(), need)) {
-            restoreChipIn(table, player, denars);
-            if (player != null) {
-                player.sendMessage(Messages.get("bet.bank_short"));
-            }
-            return false;
+        // The tray only holds whole coins, so a gap smaller than one coin waits for settle.
+        int fund = (need / unit) * unit;
+        if (fund < 1) {
+            return true;
         }
-        TableManager.get().spawnStoredPiles(table, table.getId(), item, need, tray);
-        return true;
-    }
-
-    private static void restoreChipIn(Table table, Player player, int denars) {
-        if (table == null || player == null || denars < 1) {
-            return;
-        }
-        TableManager manager = TableManager.get();
-        UUID owner = player.getUniqueId();
-        List<PotPile> back = manager.detachDenars(table,
-                pile -> owner.equals(pile.ownerId()) && !manager.isTrayPile(table, pile), denars);
-        List<PayoutFlight> flights = new ArrayList<>();
-        for (PotPile pile : back) {
-            flights.add(new PayoutFlight(pile, owner));
-        }
-        manager.flushPiles(table, flights, null);
+        TableLayout layout = Cache.layoutOf(table.getGameId());
+        Location tray = layout != null ? layout.trayLocation(table) : null;
+        TxResult result = WagerEngine.get().fundFromHouse(table, table.getId(), template, fund, tray,
+                "tray cover");
+        return result.ok();
     }
 
     /**
@@ -494,26 +558,107 @@ public final class BlackjackGame implements Game {
                 prepareIdle(table);
                 return;
             }
+            if (houseFunded(table) && !reserveRound(table)) {
+                messageBoxes(table, Messages.get("bet.house_short"));
+                refundOpenBoxes(table);
+                drainAutoTray(table);
+                prepareIdle(table);
+                return;
+            }
             TableManager.get().beginSession(table);
         } else if (auto(table) && !table.live()) {
             prepareIdle(table);
         }
     }
 
+    private static void messageBoxes(Table table, String message) {
+        for (UUID owner : TableManager.get().boxOwners(table)) {
+            Player player = Bukkit.getPlayer(owner);
+            if (player != null && player.isOnline()) {
+                player.sendMessage(message);
+            }
+        }
+    }
+
+    /**
+     * The most the house can be asked for this round: every box split to the cap, every hand
+     * doubled, every one of them won. A win pays 1:1, so this is also what the tray must hold.
+     */
+    private static int roundLiability(Table table) {
+        if (table == null) {
+            return 0;
+        }
+        TableManager manager = TableManager.get();
+        int hands = maxHandsPerBox(table);
+        int liability = 0;
+        for (UUID owner : manager.boxOwners(table)) {
+            liability += manager.ownedDenars(table, owner) * hands * 2;
+        }
+        return liability;
+    }
+
+    /**
+     * Put the whole worst case in the tray before the first card, so no split or double later in
+     * the round has to ask the bank for anything. What is not won goes back at round end.
+     */
+    private static boolean reserveRound(Table table) {
+        TableManager manager = TableManager.get();
+        int need = roundLiability(table) - trayTotal(table);
+        if (need < 1) {
+            return true;
+        }
+        ItemStack template = manager.feltItem(table, table.getId());
+        if (template == null) {
+            for (UUID owner : manager.boxOwners(table)) {
+                template = manager.feltItem(table, owner);
+                if (template != null) {
+                    break;
+                }
+            }
+        }
+        int unit = manager.chipUnitDenars(template);
+        if (template == null || unit < 1) {
+            return false;
+        }
+        // Round up: over-reserving is banked again at round end, under-reserving is the hole we are closing.
+        int fund = ((need + unit - 1) / unit) * unit;
+        TableLayout layout = Cache.layoutOf(table.getGameId());
+        Location tray = layout != null ? layout.trayLocation(table) : null;
+        TxResult result = WagerEngine.get().fundFromHouse(table, table.getId(), template, fund, tray,
+                "round reserve");
+        return result.ok() && result.moved() >= need;
+    }
+
+    /**
+     * Between rounds nothing is staked, so the whole float goes back to the bank. This takes the
+     * pickup path rather than a peel, because that one drops the coins at the table if the owning
+     * guild has gone away instead of destroying them.
+     */
+    private static void drainAutoTray(Table table) {
+        if (table == null || !houseFunded(table) || trayTotal(table) < 1) {
+            return;
+        }
+        TableManager.get().bankAutoTray(table);
+    }
+
+    /**
+     * True if the house can take {@code extra} more action. The round reserve normally covers it
+     * outright, so this only bites if the reserve came up short. A table stocked by its own dealer
+     * is their problem, not the tray's.
+     */
+    private static boolean houseCanCover(Table table, int extra) {
+        if (!houseFunded(table)) {
+            return true;
+        }
+        return trayTotal(table) >= actionTotal(table) + extra;
+    }
+
     private void refundUnderMinBoxes(Table table) {
         TableManager manager = TableManager.get();
         int min = table.minBet();
-        UUID dealer = table.dealerId();
-        UUID house = table.getId();
-        LinkedHashSet<UUID> owners = new LinkedHashSet<>();
-        for (PotPile pile : table.getPiles()) {
-            UUID owner = pile.ownerId();
-            if (owner == null || owner.equals(dealer) || owner.equals(house) || manager.isTrayPile(table, pile)) {
-                continue;
-            }
-            owners.add(owner);
-        }
-        for (UUID owner : owners) {
+        List<PayoutFlight> flights = new ArrayList<>();
+        int released = 0;
+        for (UUID owner : manager.boxOwners(table)) {
             int felt = manager.ownedDenars(table, owner);
             if (felt >= min || felt < 1) {
                 continue;
@@ -521,103 +666,64 @@ public final class BlackjackGame implements Game {
             Player player = Bukkit.getPlayer(owner);
             if (player != null) {
                 player.sendMessage(Messages.get("bet.under_min", "min", String.valueOf(min)));
-                manager.refundPiles(table, player,
-                        pile -> owner.equals(pile.ownerId()) && !manager.isTrayPile(table, pile));
-            } else {
-                List<PayoutFlight> flights = new ArrayList<>();
-                for (PotPile pile : new ArrayList<>(table.getPiles())) {
-                    if (owner.equals(pile.ownerId()) && !manager.isTrayPile(table, pile)) {
-                        flights.add(new PayoutFlight(pile, owner));
-                    }
-                }
-                manager.flushPiles(table, flights, null);
             }
-            if (auto(table)) {
-                peelAutoTray(table, felt);
-            }
+            released += WagerEngine.get().refund(table, owner, player, 0, flights, "under min refund")
+                    .moved();
+        }
+        refundAndPeel(table, flights, released);
+    }
+
+    /** One wave for every owner, then one peel, so no refund is dropped mid-flight. */
+    private void refundAndPeel(Table table, List<PayoutFlight> flights, int released) {
+        if (released < 1 && flights.isEmpty()) {
+            return;
+        }
+        TableManager.get().flushPiles(table, flights, null);
+        if (houseFunded(table)) {
+            peelAutoTray(table, released);
         }
     }
 
     private void refundOpenBoxes(Table table) {
         TableManager manager = TableManager.get();
-        UUID dealer = table.dealerId();
-        UUID house = table.getId();
-        LinkedHashSet<UUID> owners = new LinkedHashSet<>();
-        for (PotPile pile : table.getPiles()) {
-            UUID owner = pile.ownerId();
-            if (owner == null || owner.equals(dealer) || owner.equals(house) || manager.isTrayPile(table, pile)) {
-                continue;
-            }
-            owners.add(owner);
-        }
-        for (UUID owner : owners) {
-            int felt = manager.ownedDenars(table, owner);
-            if (felt < 1) {
+        List<PayoutFlight> flights = new ArrayList<>();
+        int released = 0;
+        for (UUID owner : manager.boxOwners(table)) {
+            if (manager.ownedDenars(table, owner) < 1) {
                 continue;
             }
             Player player = Bukkit.getPlayer(owner);
             if (player != null) {
                 player.sendMessage(Messages.get("bet.no_slots"));
-                manager.refundPiles(table, player,
-                        pile -> owner.equals(pile.ownerId()) && !manager.isTrayPile(table, pile));
-            } else {
-                List<PayoutFlight> flights = new ArrayList<>();
-                for (PotPile pile : new ArrayList<>(table.getPiles())) {
-                    if (owner.equals(pile.ownerId()) && !manager.isTrayPile(table, pile)) {
-                        flights.add(new PayoutFlight(pile, owner));
-                    }
-                }
-                manager.flushPiles(table, flights, null);
             }
-            if (auto(table)) {
-                peelAutoTray(table, felt);
-            }
+            released += WagerEngine.get().refund(table, owner, player, 0, flights, "box refund")
+                    .moved();
         }
+        refundAndPeel(table, flights, released);
     }
 
+    /**
+     * The action shrank by {@code released}, so give the tray excess back to the bank.
+     * Callers refund first, so the piles are already gone from the felt here.
+     */
     private static void peelAutoTray(Table table, int released) {
         if (table == null || released < 1) {
             return;
         }
-        int peel = Math.max(0, Math.min(released, actionTotal(table) + released - trayTotal(table)));
+        int peel = Math.max(0, Math.min(released, trayTotal(table) - actionTotal(table)));
         if (peel < 1) {
             return;
         }
-        TableManager manager = TableManager.get();
-        List<PotPile> peeled = manager.detachDenars(table, pile -> manager.isTrayPile(table, pile), peel);
-        List<PayoutFlight> flights = new ArrayList<>();
-        for (PotPile pile : peeled) {
-            flights.add(new PayoutFlight(pile, null));
-        }
-        manager.flushPiles(table, flights, null);
+        WagerEngine.get().peelToHouse(table, peel, "peel");
     }
 
     private static int trayTotal(Table table) {
-        if (table == null) {
-            return 0;
-        }
-        TableManager manager = TableManager.get();
-        int total = 0;
-        for (PotPile pile : table.getPiles()) {
-            if (manager.isTrayPile(table, pile)) {
-                total += pile.contribution();
-            }
-        }
-        return total;
+        return TableManager.get().trayDenars(table);
     }
 
+    /** Every denar on the felt: the whole ledger minus the tray. */
     private static int actionTotal(Table table) {
-        if (table == null) {
-            return 0;
-        }
-        TableManager manager = TableManager.get();
-        int total = 0;
-        for (PotPile pile : table.getPiles()) {
-            if (pile.ownerId() != null && !manager.isTrayPile(table, pile)) {
-                total += pile.contribution();
-            }
-        }
-        return total;
+        return WagerEngine.get().felt(table);
     }
 
     private void prepareIdle(Table table) {
@@ -766,9 +872,11 @@ public final class BlackjackGame implements Game {
     }
 
     void stand(Table table, Player player) {
-        if (!canAct(table, player, currentHand(table))) {
+        BjHand hand = currentHand(table);
+        if (!canAct(table, player, hand)) {
             return;
         }
+        hand.stood = true;
         speak(table, player, "stand");
         nextHand(table);
     }
@@ -783,11 +891,17 @@ public final class BlackjackGame implements Game {
             player.sendMessage(Messages.get("bet.no_double"));
             return;
         }
+        // Before the chips move, not after: a refused cover used to leave the bet doubled anyway.
+        if (!houseCanCover(table, hand.bet)) {
+            player.sendMessage(Messages.get("bet.bank_short"));
+            return;
+        }
         if (!stakeExtra(table, player, hand.bet)) {
             return;
         }
         hand.bet *= 2;
         hand.doubled = true;
+        checkBoxBets(table, "double");
         player.sendMessage(Messages.get("bet.doubled"));
         speak(table, player, "double");
         TableManager.get().refreshLabel(table);
@@ -801,8 +915,13 @@ public final class BlackjackGame implements Game {
         }
         List<BjHand> boxHands = boxHands(table);
         List<HandCard> cards = cardsOf(table, hand);
-        if (hand.slot != 0 || hand.fromSplit || boxHands.size() != 1 || cards.size() != 2 || !isPair(cards)) {
+        if (boxHands.size() >= maxHandsPerBox(table) || cards.size() != 2 || !isPair(cards)
+                || (hand.splitAces && !resplitAces(table))) {
             player.sendMessage(Messages.get("bet.no_split"));
+            return;
+        }
+        if (!houseCanCover(table, hand.bet)) {
+            player.sendMessage(Messages.get("bet.bank_short"));
             return;
         }
         if (!stakeExtra(table, player, hand.bet)) {
@@ -811,52 +930,209 @@ public final class BlackjackGame implements Game {
         boolean aces = isAce(cards.get(0)) && isAce(cards.get(1));
         hand.fromSplit = true;
         hand.splitAces = aces;
-        BjHand second = new BjHand(hand.owner, 1, hand.bet);
+        List<BjHand> round = rounds.get(table.getId());
+        // A free slot until renumberBox assigns the real one, so no two hands claim the same cards.
+        BjHand second = new BjHand(hand.owner, round.size(), nextFreeSlot(table, hand.owner), hand.bet);
         second.fromSplit = true;
         second.splitAces = aces;
-        List<BjHand> round = rounds.get(table.getId());
         int at = round.indexOf(hand);
         round.add(at + 1, second);
         TableManager manager = TableManager.get();
-        List<HandCard> held = table.handOf(hand.owner);
-        if (held.size() > 1) {
-            held.get(1).setSlot(1);
+        // The card that leaves belongs to this hand, which on a resplit is not the box's second card.
+        List<HandCard> moving = cardsOf(table, hand);
+        renumberBox(table, hand.owner);
+        if (moving.size() > 1) {
+            moving.get(1).setSlot(second.slot);
         }
         Player online = Bukkit.getPlayer(hand.owner);
         if (online != null && online.isOnline()) {
             manager.relayoutHand(table, online);
         }
+        checkBoxBets(table, "split");
         player.sendMessage(Messages.get("bet.split"));
         speak(table, player, "split");
         manager.refreshLabel(table);
         table.setPhase(DEAL);
-        dealToBox(table, hand.owner, 0, () -> {
+        int first = hand.slot;
+        int next = second.slot;
+        dealToBox(table, hand.owner, first, () -> {
             Table still = TableManager.get().table(table.getId());
             if (still == null || !still.live()) {
                 return;
             }
-            dealToBox(still, hand.owner, 1, () -> {
+            dealToBox(still, hand.owner, next, () -> {
                 Table live = TableManager.get().table(still.getId());
                 if (live == null || !live.live()) {
                     return;
                 }
                 live.setPhase(PLAY);
-                live.setHandIndex(0);
+                // Resume on the hand that was split, never back at the box's first hand.
+                live.setHandIndex(first);
                 advancePlay(live);
             });
         });
     }
 
+    /**
+     * Give a box's hands slots 0..n-1 in play order, moving their cards with them. The new hand
+     * from a split already sits next to its parent in the round list, so it lands next to it in
+     * the fan too. Parking cards out of range first keeps a shift from landing on a slot that has
+     * not moved yet.
+     */
+    private void renumberBox(Table table, UUID owner) {
+        List<BjHand> hands = handsOf(table, owner);
+        if (hands.isEmpty()) {
+            return;
+        }
+        List<HandCard> held = table.handOf(owner);
+        Map<Integer, Integer> moves = new HashMap<>();
+        for (int i = 0; i < hands.size(); i++) {
+            moves.put(hands.get(i).slot, i);
+        }
+        for (HandCard card : held) {
+            Integer to = moves.get(card.slot());
+            if (to != null) {
+                card.setSlot(SLOT_PARK + to);
+            }
+        }
+        for (int i = 0; i < hands.size(); i++) {
+            hands.get(i).slot = i;
+        }
+        for (HandCard card : held) {
+            if (card.slot() >= SLOT_PARK) {
+                card.setSlot(card.slot() - SLOT_PARK);
+            }
+        }
+    }
+
+    private int nextFreeSlot(Table table, UUID owner) {
+        int max = -1;
+        for (BjHand hand : handsOf(table, owner)) {
+            max = Math.max(max, hand.slot);
+        }
+        return max + 1;
+    }
+
+    /** Every hand this owner holds, in play order. */
+    private List<BjHand> handsOf(Table table, UUID owner) {
+        List<BjHand> out = new ArrayList<>();
+        if (table == null || owner == null) {
+            return out;
+        }
+        for (BjHand hand : rounds.getOrDefault(table.getId(), List.of())) {
+            if (owner.equals(hand.owner)) {
+                out.add(hand);
+            }
+        }
+        return out;
+    }
+
+    private static int maxHandsPerBox(Table table) {
+        TableLayout layout = table != null ? Cache.layoutOf(table.getGameId()) : null;
+        return layout != null ? layout.maxHandsPerBox() : 4;
+    }
+
+    private static boolean resplitAces(Table table) {
+        TableLayout layout = table != null ? Cache.layoutOf(table.getGameId()) : null;
+        return layout != null && layout.resplitAces();
+    }
+
+    /**
+     * The extra bet a double or a split needs, out of the player's coins. Either the whole bet is
+     * on the felt when this returns true, or nothing left their pockets and it returns false.
+     * There is no third outcome, which is what the old version had.
+     */
     private boolean stakeExtra(Table table, Player player, int bet) {
         if (bet < 1) {
             player.sendMessage(Messages.get("bet.need_chips"));
             return false;
         }
-        if (!TableManager.get().placeChipsFromInventory(table, player, bet)) {
-            player.sendMessage(Messages.get("bet.need_chips"));
+        TableManager manager = TableManager.get();
+        UUID owner = player.getUniqueId();
+        MoneyTx tx = WagerEngine.get().begin(table, "extra bet");
+        // Placed on the box, so a double grows the heap already sitting there instead of
+        // starting a second one on top of it.
+        tx.move(Accounts.coins(table, player),
+                Accounts.bucket(table, owner).placedAt(manager.boxLocation(table, owner)), bet);
+        // The house has to be good for the bigger action in the same breath, so a bank that comes
+        // up short leaves the bet in the player's pocket rather than on the felt.
+        if (houseFunded(table)) {
+            int need = Math.max(0, actionTotal(table) + bet - trayTotal(table));
+            if (need > 0) {
+                ItemStack template = houseTemplate(table, owner);
+                int unit = manager.chipUnitDenars(template);
+                if (unit < 1) {
+                    player.sendMessage(Messages.get("bet.bank_short"));
+                    return false;
+                }
+                TableLayout layout = Cache.layoutOf(table.getGameId());
+                Location tray = layout != null ? layout.trayLocation(table) : null;
+                // The tray holds whole coins, so a gap under one coin waits for settle.
+                tx.move(Accounts.house(table), Accounts.tray(table).at(tray),
+                        (need / unit) * unit, template);
+            }
+        }
+        TxResult result = tx.commit();
+        if (!result.ok()) {
+            player.sendMessage(refusal(result, bet));
             return false;
         }
+        manager.playChipSound(table, manager.boxLocation(table, owner));
         return true;
+    }
+
+    /**
+     * A box should hold exactly what its hands are betting, nothing more and nothing less.
+     *
+     * <p>This is the check that would have caught the double-down bug the instant it happened:
+     * the hand's bet doubled while the felt still held the original, because the extra stake had
+     * been handed back by a step whose answer nobody looked at.
+     */
+    private void checkBoxBets(Table table, String stage) {
+        if (table == null || !Cache.wagerAuditLog) {
+            return;
+        }
+        Map<UUID, Integer> betting = new LinkedHashMap<>();
+        for (BjHand hand : rounds.getOrDefault(table.getId(), List.of())) {
+            betting.merge(hand.owner, hand.bet, Integer::sum);
+        }
+        for (Map.Entry<UUID, Integer> entry : betting.entrySet()) {
+            int held = WagerEngine.get().owned(table, entry.getKey());
+            if (held != entry.getValue()) {
+                MoneyLog.mismatch(table, stage + " box " + entry.getKey() + " is betting "
+                        + entry.getValue() + " but holds " + held);
+            }
+        }
+    }
+
+    /** A coin the house can pay in: whatever is already on this table, smallest first. */
+    private static ItemStack houseTemplate(Table table, UUID prefer) {
+        TableManager manager = TableManager.get();
+        ItemStack template = manager.feltItem(table, table.getId());
+        if (template == null && prefer != null) {
+            template = manager.feltItem(table, prefer);
+        }
+        if (template == null) {
+            for (UUID owner : manager.boxOwners(table)) {
+                template = manager.feltItem(table, owner);
+                if (template != null) {
+                    break;
+                }
+            }
+        }
+        return template;
+    }
+
+    /** What to tell a player whose bet was refused, naming the actual reason. */
+    private static String refusal(TxResult result, int bet) {
+        if (result == null) {
+            return Messages.get("bet.need_chips");
+        }
+        if (result.reason() == TxResult.Reason.NO_CHANGE) {
+            return Messages.get("bet.no_change", "amount", String.valueOf(bet), "best",
+                    String.valueOf(result.best()));
+        }
+        return Messages.get(result.messageKey() != null ? result.messageKey() : "bet.need_chips");
     }
 
     private void dealToHand(Table table, Player player, BjHand hand, boolean fromDouble) {
@@ -938,20 +1214,21 @@ public final class BlackjackGame implements Game {
         }
         UUID tableId = table.getId();
         UUID owner = hand.owner;
-        int slot = hand.slot;
+        int id = hand.id;
         afterResultDelay(table, () -> {
             Table live = TableManager.get().table(tableId);
             if (live == null || !live.live()) {
                 return;
             }
-            BjHand still = findHand(live, owner, slot);
+            BjHand still = findHand(live, owner, id);
             finishPlayerCard(live, still, fromDouble);
         });
     }
 
-    private BjHand findHand(Table table, UUID owner, int slot) {
+    /** By id, not slot: a split between the deal and the delay renumbers every slot in the box. */
+    private BjHand findHand(Table table, UUID owner, int id) {
         for (BjHand hand : rounds.getOrDefault(table.getId(), List.of())) {
-            if (hand.owner.equals(owner) && hand.slot == slot) {
+            if (hand.owner.equals(owner) && hand.id == id) {
                 return hand;
             }
         }
@@ -994,7 +1271,7 @@ public final class BlackjackGame implements Game {
                     continue;
                 }
                 int total = bestTotal(cards);
-                boolean done = total >= 21 || hand.doubled
+                boolean done = total >= 21 || hand.doubled || hand.stood
                         || (hand.splitAces && cards.size() >= 2);
                 if (done) {
                     UUID tableId = table.getId();
@@ -1072,6 +1349,7 @@ public final class BlackjackGame implements Game {
             return;
         }
         table.setPhase(SETTLE);
+        checkBoxBets(table, "settle");
         TableManager manager = TableManager.get();
         int dealerTotal = bestTotal(table.tablePile("dealer"));
         boolean dealerBust = dealerTotal > 21;
@@ -1107,73 +1385,81 @@ public final class BlackjackGame implements Game {
                 player.sendMessage(Messages.get(natural ? "bet.natural" : "bet.win"));
             }
         }
-        boolean house = !auto(table);
-        IdentityHashMap<PotPile, PayoutFlight> dests = new IdentityHashMap<>();
+        // Who is behind the house here. On a table with no guild that is the dealer out of their
+        // own pocket; on a guild table it is the bank, whether or not a human is turning the cards.
+        boolean dealerBacked = !houseFunded(table);
+        UUID trayId = table.getId();
+        List<PayoutFlight> flights = new ArrayList<>();
+        int held = trayTotal(table) + actionTotal(table);
+        // Nothing comes into the table during a settle. A dealer or a bank covering a win pays the
+        // winner directly, so that money is never table money for even an instant.
+        int wentOut = 0;
+        // Losing bets leave the box: a private dealer takes them, the house tray keeps them.
         for (Map.Entry<UUID, Integer> entry : collect.entrySet()) {
             UUID owner = entry.getKey();
-            List<PotPile> lost = manager.detachDenars(table, pile -> owner.equals(pile.ownerId())
-                    && !manager.isTrayPile(table, pile), entry.getValue());
-            for (PotPile pile : lost) {
-                dests.put(pile, house ? new PayoutFlight(pile, dealerId) : PayoutFlight.toTray(pile));
+            if (dealerBacked) {
+                wentOut += WagerEngine.get()
+                        .refund(table, owner, dealer, entry.getValue(), flights, "loss to dealer")
+                        .moved();
+            } else {
+                WagerEngine.get().toTray(table, owner, entry.getValue(), flights, "loss");
             }
         }
         for (Map.Entry<UUID, Integer> entry : pay.entrySet()) {
             UUID owner = entry.getKey();
             int amount = entry.getValue();
-            ItemStack template = templates.get(owner);
-            int covered = 0;
-            List<PotPile> fromTray = manager.detachDenars(table, pile -> manager.isTrayPile(table, pile),
-                    amount);
-            for (PotPile pile : fromTray) {
-                dests.put(pile, new PayoutFlight(pile, owner));
-                covered += pile.contribution();
+            Player winner = Bukkit.getPlayer(owner);
+            // One movement: the tray pays what it can make, and whoever backs the table covers
+            // the rest directly. Nothing sits half paid waiting for a second step to work.
+            int fromTray = Math.min(amount, WagerEngine.get().tray(table));
+            fromTray = Accounts.tray(table).largestTakeUpTo(fromTray, null);
+            MoneyTx tx = WagerEngine.get().begin(table, "win payout").animate(flights);
+            MoneyAccount to = Accounts.payee(table, winner, owner);
+            tx.moveUpTo(Accounts.tray(table), to, amount);
+            int rest = amount - fromTray;
+            if (rest > 0) {
+                if (dealerBacked) {
+                    if (dealer != null && dealer.isOnline()) {
+                        tx.moveUpTo(Accounts.pockets(table, dealer), to, rest);
+                    }
+                } else {
+                    // The round reserve is sized to make this unreachable, so say so if it happens.
+                    if (Cache.wagerAuditLog) {
+                        MoneyLog.mismatch(table, "tray short " + rest + " paying " + owner
+                                + ", the round reserve should have covered it");
+                    }
+                    ItemStack template = templates.get(owner);
+                    if (template == null) {
+                        template = houseTemplate(table, owner);
+                    }
+                    tx.moveUpTo(Accounts.house(table), to, rest, template);
+                }
             }
-            int shortfall = amount - covered;
-            if (house) {
-                if (shortfall > 0 && dealer != null && dealer.isOnline()) {
-                    int fromInv = manager.takeDenarsFromInventory(dealer, shortfall);
-                    if (fromInv > 0 && template != null) {
-                        Location at = manager.boxLocation(table, owner);
-                        for (PotPile pile : manager.spawnStoredPiles(table, owner, template, fromInv, at)) {
-                            dests.put(pile, new PayoutFlight(pile, owner));
-                            covered += pile.contribution();
-                        }
-                    }
-                }
-                int owe = amount - covered;
-                if (owe > 0 && dealer != null && dealer.isOnline()) {
-                    dealer.sendMessage(Messages.get("bet.owe", "amount", String.valueOf(owe)));
-                }
-            } else if (shortfall > 0 && template != null) {
-                int spawn = shortfall;
-                if (!table.staffMint()) {
-                    if (!GuildTables.tryWithdraw(table.ownerGuildId(), shortfall)) {
-                        spawn = 0;
-                        Player winner = Bukkit.getPlayer(owner);
-                        if (winner != null && winner.isOnline()) {
-                            winner.sendMessage(Messages.get("bet.owe", "amount", String.valueOf(shortfall)));
-                        }
-                    }
-                }
-                if (spawn > 0) {
-                    TableLayout layout = Cache.layoutOf(table.getGameId());
-                    Location tray = layout != null ? layout.trayLocation(table) : table.getOrigin();
-                    for (PotPile pile : manager.spawnStoredPiles(table, table.getId(), template, spawn, tray)) {
-                        dests.put(pile, new PayoutFlight(pile, owner));
-                    }
+            int paid = tx.commit().moved();
+            // Only the tray's share came off this table. The rest was never table money.
+            wentOut += Math.min(paid, fromTray);
+            int owe = amount - paid;
+            if (owe > 0) {
+                Player tell = dealerBacked ? dealer : winner;
+                if (tell != null && tell.isOnline()) {
+                    tell.sendMessage(Messages.get("bet.owe", "amount", String.valueOf(owe)));
                 }
             }
         }
-        for (PotPile pile : table.getPiles()) {
-            if (dests.containsKey(pile) || manager.isTrayPile(table, pile)) {
-                continue;
-            }
-            UUID owner = pile.ownerId();
-            if (owner != null) {
-                dests.put(pile, new PayoutFlight(pile, owner));
-            }
+        // Pushes and anything a winner still has on the felt goes straight back to them.
+        for (UUID owner : new ArrayList<>(manager.boxOwners(table))) {
+            Player back = Bukkit.getPlayer(owner);
+            wentOut += WagerEngine.get().refund(table, owner, back, 0, flights, "bet returned")
+                    .moved();
         }
-        manager.flushPiles(table, new ArrayList<>(dests.values()), () -> startLinger(table));
+        manager.checkFeltEmpty(table, "settle");
+        int expected = held - wentOut;
+        int now = trayTotal(table) + actionTotal(table);
+        if (Cache.wagerAuditLog && now != expected) {
+            MoneyLog.mismatch(table, "settle held " + held + " paid out " + wentOut
+                    + " so it should hold " + expected + " but holds " + now);
+        }
+        manager.flushPiles(table, flights, () -> startLinger(table));
     }
 
     private void startLinger(Table table) {
@@ -1225,28 +1511,18 @@ public final class BlackjackGame implements Game {
         manager.endSession(table);
     }
 
+    /** Boxes play left to right, ordered by where each bucket sits on the felt. */
     private void snapshotBoxes(Table table) {
         table.boxes().clear();
-        UUID dealer = table.dealerId();
-        Map<UUID, double[]> sums = new HashMap<>();
-        for (PotPile pile : table.getPiles()) {
-            UUID owner = pile.ownerId();
-            if (owner == null || owner.equals(dealer) || TableManager.get().isTrayPile(table, pile)) {
-                continue;
-            }
-            Location at = table.getOrigin().clone();
-            at.setX(pile.x());
-            at.setZ(pile.z());
-            double right = TableLayout.localRight(table, at);
-            double forward = TableLayout.localForward(table, at);
-            double[] acc = sums.computeIfAbsent(owner, id -> new double[3]);
-            acc[0] += right;
-            acc[1] += forward;
-            acc[2] += 1;
+        TableManager manager = TableManager.get();
+        List<UUID> order = new ArrayList<>(manager.boxOwners(table));
+        Map<UUID, double[]> spots = new HashMap<>();
+        for (UUID owner : order) {
+            Location at = manager.boxLocation(table, owner);
+            spots.put(owner, new double[] {TableLayout.localRight(table, at), TableLayout.localForward(table, at)});
         }
-        List<UUID> order = new ArrayList<>(sums.keySet());
-        order.sort(Comparator.comparingDouble((UUID id) -> sums.get(id)[0] / sums.get(id)[2])
-                .thenComparingDouble(id -> sums.get(id)[1] / sums.get(id)[2])
+        order.sort(Comparator.comparingDouble((UUID id) -> spots.get(id)[0])
+                .thenComparingDouble(id -> spots.get(id)[1])
                 .thenComparing(UUID::toString));
         table.boxes().addAll(order);
     }
@@ -1425,14 +1701,19 @@ public final class BlackjackGame implements Game {
 
     private static final class BjHand {
         private final UUID owner;
-        private final int slot;
+        /** Stable for the whole round, so a hand survives being renumbered mid-animation. */
+        private final int id;
+        /** Play order inside the box, and the card fan group. Renumbered on every split. */
+        private int slot;
         private int bet;
         private boolean doubled;
         private boolean fromSplit;
         private boolean splitAces;
+        private boolean stood;
 
-        private BjHand(UUID owner, int slot, int bet) {
+        private BjHand(UUID owner, int id, int slot, int bet) {
             this.owner = owner;
+            this.id = id;
             this.slot = slot;
             this.bet = Math.max(0, bet);
         }

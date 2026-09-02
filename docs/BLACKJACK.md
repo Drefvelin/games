@@ -2,6 +2,8 @@
 
 Engines stay dumb. [BlackjackGame](../src/main/java/net/tfminecraft/games/game/BlackjackGame.java) owns rules, turns, and which engine calls to make. Do not put 21 or house payout in `Deck`, `Display`, or `Wager`.
 
+Money is not one of those rules: every bet, cover, refund and payout below goes through the wager engine as a transaction. See [WAGER_ENGINE.md](WAGER_ENGINE.md).
+
 Hold'em is Phase 3. Chip **mountain / ring pack** (visual heaps) is later, not this phase.
 
 Player-facing strings: no em dash (U+2014).
@@ -16,7 +18,8 @@ There is **no shared pot**. Each player bets in a box. The house pays wins and t
 - **Bets are coins only.** DenarEconomy coins and configured gold/silver coin items. No gold ingot, no `wager.items`, no `/wager` loot.
 - **Double and split are allowed.** The dealer **cannot refuse** them. The **player** must put out an equal extra bet. If they cannot, the action fails (not a dealer no).
 - **Doubled hands pay even money**, not 3:2. Naturals (two-card 21) pay **3:2**. Usual strip limits: split pairs, double after split (DAS), doubled/split hands are not naturals.
-- **House bank is unbounded.** A player banker can lose a lot. Auto dealer covers each box bet 1:1 on the tray (same stored items) and mints any extra shortfall (naturals). Tray stacks spread around the tray centre (not one pile). A total holo sits over the tray.
+- **Resplit up to four hands per box.** `max-hands-per-box: 4` (three resplits). A split pair of aces cannot be split again unless `resplit-aces: true`. Each new hand needs its own equal bet from the player, same as the first split.
+- **The house pre-funds each round.** Before the first card, an auto table moves the round's worst case into the tray: every box's stake times `max-hands-per-box` times 2, since every hand can be doubled and a win pays 1:1. If the guild bank cannot supply it the round does not start, every box is refunded, and boxes get `bet.house_short`. That is why a big-max table needs a deep bank: 6 boxes at 1000 is 48000. The gate reads the **real bets** at close, not the table max, so a table of 100-denar bets only needs 4800. Splits and doubles during the round therefore never ask the bank for anything. Whatever is not won goes back to the bank at round end, so the tray sits at zero between rounds. Tray stacks spread around the tray centre (not one pile). A total holo sits over the tray.
 - **Six boxes.** `max-boxes: 6`. A seventh player cannot place until a box is empty. Adding onto an existing box is still allowed.
 - **Insurance / even money / surrender / dealer peek** are **out of Phase 2**.
 
@@ -77,7 +80,9 @@ Until that phase ships, current tables still:
 - Min/max from config (`blackjack.min-bet`, `blackjack.max-bet`).
 - First **legal** bet starts a **10s** window (`blackjack.bet-seconds`). Label under the name counts down.
 - Timer end → close + deal (no shoe click).
-- Each legal box bet (and double/split extra) adds to the house tray **only the shortfall** so tray denars cover action 1:1. If the tray already covers the new total, nothing is minted. Leave during the bet window peels cover only when the tray was short of that stake (leftover bank stays). Wins take extra from the tray first. Losses flush the player's felt onto the tray (visible) and leave the cover.
+- **During the bet window** each legal box bet adds to the house tray **only the shortfall** so tray denars cover action 1:1. If the tray already covers the new total, nothing is minted. Leave during the bet window peels cover only when the tray was short of that stake (leftover bank stays).
+- **At close** the tray is topped up to the round's worst case (see the rules above), rounded up to a whole coin. From there the round is self-funded: a split or double takes its cover from the reserve already sitting in the tray, so it can never be refused for a bank shortfall and can never leave a hand betting more than it staked. Wins take from the tray first. Losses flush the player's felt onto the tray (visible).
+- **At round end** the tray goes back to the guild bank in full, settled or abandoned, because nothing is staked between rounds. A staff mint table burns it instead.
 
 After guild house: **staff mint** keeps that spawn path. **Guild auto** withdraws the same shortfall from the owning guild bank (refuse the chip-in if the bank cannot cover). Human dealers stock the tray.
 
@@ -92,7 +97,7 @@ During a player's turn:
 - **Hit:** shoe right-click, `/games bet hit`, or saying `hit` in chat (case insensitive). Same voice line.
 - **Stand / double / split:** `/games bet …` or the same words in chat.
 
-**Split:** second hand on the **same fan**, a bit toward the shoe and to the player's right, overlapping the first hand and slightly higher (card-layer gap).
+**Split:** each hand is its own group on the **same fan**. Groups are spread sideways and centred on the player, `hand.split-group-gap` apart, and each later group sits a touch nearer the shoe and one card-layer higher. A new hand from a split lands **immediately right of the hand it came from**, so the pair stays together, and the groups are renumbered left to right, which is also the order they are played.
 
 Then next box. Dealer plays last (auto stand on 17, hit below; lock **S17**). Config `dealer-hits-soft-17: false` (S17).
 

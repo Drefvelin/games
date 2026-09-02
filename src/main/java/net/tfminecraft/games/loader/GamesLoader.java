@@ -131,6 +131,8 @@ public final class GamesLoader implements LoaderInterface {
         int resultDelay = Math.max(0, section.getInt("result-delay-ticks", 8));
         int roundEnd = Math.max(1, section.getInt("round-end-seconds", 10));
         int maxBoxes = Math.max(0, section.getInt("max-boxes", 0));
+        int maxHandsPerBox = Math.max(1, section.getInt("max-hands-per-box", 4));
+        boolean resplitAces = section.getBoolean("resplit-aces", false);
         int smallBlind = 0;
         int bigBlind = 0;
         ConfigurationSection blinds = section.getConfigurationSection("blinds");
@@ -155,7 +157,7 @@ public final class GamesLoader implements LoaderInterface {
         }
         return new TableLayout(cardSet, label, icon, leave, piles, ring, box, stand, noBet, hitsSoft17,
                 autoDealer, minBet, maxBet, betSeconds, voice, betZone, resultDelay, roundEnd, chipFx, maxBoxes,
-                smallBlind, bigBlind);
+                smallBlind, bigBlind, maxHandsPerBox, resplitAces);
     }
 
     private static void loadRankValues(String gameId, ConfigurationSection section) {

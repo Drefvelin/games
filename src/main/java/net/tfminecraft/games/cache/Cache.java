@@ -2,12 +2,14 @@ package net.tfminecraft.games.cache;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
 import org.bukkit.Sound;
 
+import net.tfminecraft.games.help.HelpBook;
 import net.tfminecraft.games.layout.TableLayout;
 import net.tfminecraft.games.wager.WagerItemOverride;
 
@@ -48,6 +50,7 @@ public final class Cache {
     public static double handSitRange = 1.5;
     public static float handSitEdge = 0.45f;
     public static float handSitInset = 0.12f;
+    public static float handSplitGroupGap = 0.35f;
     public static int handRevealStagger = 4;
     public static int handRevealFlip = 8;
     public static int handDealTicks = 10;
@@ -72,14 +75,25 @@ public final class Cache {
     public static int wagerPlaceSeconds = 10;
     public static int wagerPayoutTicks = 10;
     public static int wagerMinPlayers = 1;
+    public static boolean wagerAuditLog = true;
+    public static boolean wagerShowChips = true;
     public static WagerItemOverride wagerGold;
     public static WagerItemOverride wagerSilver;
     public static final List<WagerItemOverride> wagerItems = new ArrayList<>();
     /** Catalog rank -> sort/play value, keyed by game id. Unmapped ranks stay as catalog rank. */
     public static final Map<String, Map<Integer, Integer>> gameRankValues = new HashMap<>();
     public static final Map<String, TableLayout> tableLayouts = new HashMap<>();
+    /** Help books from help.yml, keyed by what a player types after /games help. */
+    public static final Map<String, HelpBook> helpBooks = new LinkedHashMap<>();
 
     private Cache() {}
+
+    public static HelpBook helpBook(String id) {
+        if (id == null) {
+            return null;
+        }
+        return helpBooks.get(id.toLowerCase(Locale.ROOT));
+    }
 
     public static int sortValue(String gameId, int rank) {
         if (gameId == null) {

@@ -6,14 +6,16 @@ import java.util.UUID;
 
 import org.bukkit.inventory.ItemStack;
 
-/** One chip or valued-item pile on a table. */
+/**
+ * A stack of chips drawn on a table. Pure decoration: the money it depicts lives in
+ * {@link TableLedger}, and losing a pile costs nobody anything.
+ */
 public final class PotPile {
 
-    private UUID ownerId;
+    private final UUID ownerId;
     private final ItemStack item;
     private final String typeKey;
     private final int denars;
-    private int count;
     private int pieces;
     private int streetId;
     private double x;
@@ -21,24 +23,18 @@ public final class PotPile {
     private final List<UUID> tokens = new ArrayList<>();
     private final List<Float> layerYaws = new ArrayList<>();
 
-    public PotPile(UUID ownerId, ItemStack item, String typeKey, int denars, int count, double x, double z) {
+    public PotPile(UUID ownerId, ItemStack item, String typeKey, int denars, double x, double z) {
         this.ownerId = ownerId;
         this.item = item;
         this.typeKey = typeKey;
         this.denars = denars;
-        this.count = count;
-        this.pieces = Math.max(0, count);
         this.x = x;
         this.z = z;
     }
 
+    /** Which bucket this pile draws. The table id means the house tray. */
     public UUID ownerId() {
         return ownerId;
-    }
-
-    /** Null owner is the communal pot. */
-    public void setOwnerId(UUID ownerId) {
-        this.ownerId = ownerId;
     }
 
     public ItemStack item() {
@@ -49,23 +45,12 @@ public final class PotPile {
         return typeKey;
     }
 
+    /** The coin this pile depicts, for grouping only. */
     public int denars() {
         return denars;
     }
 
-    public int count() {
-        return count;
-    }
-
-    public void addOne() {
-        count++;
-        pieces++;
-    }
-
-    public void setCount(int count) {
-        this.count = Math.max(0, count);
-    }
-
+    /** How many chip layers worth of pieces are shown. */
     public int pieces() {
         return pieces;
     }
@@ -78,16 +63,6 @@ public final class PotPile {
         if (amount > 0) {
             pieces += amount;
         }
-    }
-
-    public void addCount(int amount) {
-        if (amount > 0) {
-            count += amount;
-        }
-    }
-
-    public int contribution() {
-        return denars * count;
     }
 
     public int streetId() {

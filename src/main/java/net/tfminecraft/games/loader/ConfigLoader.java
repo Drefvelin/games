@@ -78,6 +78,8 @@ public final class ConfigLoader implements LoaderInterface {
         Cache.handSitEdge = sitEdge > 0 ? sitEdge : Cache.handSitEdge;
         float sitInset = (float) config.getDouble("hand.sit-inset", Cache.handSitInset);
         Cache.handSitInset = sitInset >= 0 ? sitInset : Cache.handSitInset;
+        float groupGap = (float) config.getDouble("hand.split-group-gap", Cache.handSplitGroupGap);
+        Cache.handSplitGroupGap = groupGap >= 0 ? groupGap : Cache.handSplitGroupGap;
         int stagger = config.getInt("hand.reveal-stagger", Cache.handRevealStagger);
         Cache.handRevealStagger = stagger >= 0 ? stagger : Cache.handRevealStagger;
         int flip = config.getInt("hand.reveal-flip", Cache.handRevealFlip);
@@ -119,6 +121,8 @@ public final class ConfigLoader implements LoaderInterface {
         Cache.wagerPayoutTicks = payoutTicks >= 0 ? payoutTicks : Cache.wagerPayoutTicks;
         int minPlayers = config.getInt("wager.min-players", Cache.wagerMinPlayers);
         Cache.wagerMinPlayers = minPlayers > 0 ? minPlayers : Cache.wagerMinPlayers;
+        Cache.wagerAuditLog = config.getBoolean("wager.audit-log", Cache.wagerAuditLog);
+        Cache.wagerShowChips = config.getBoolean("wager.show-chips", Cache.wagerShowChips);
         Cache.wagerGold = readOverride(config.getConfigurationSection("wager.gold"), "ia.tfmc:gold_coin");
         Cache.wagerSilver = readOverride(config.getConfigurationSection("wager.silver"), "m.currency.silver_coin");
         Cache.wagerItems.clear();

@@ -1,0 +1,88 @@
+# Help books opened by /games help [game].
+#
+# One section per book. The key is what a player types, so `blackjack` is
+# reached with /games help blackjack. The `index` section is what plain
+# /games help opens.
+#
+# Pages are written by hand. A book page holds about thirteen short lines,
+# so keep each one roughly under two hundred letters or the end of it will
+# be cut off. Use \n for a line break.
+#
+# Colours are #rrggbb written straight into the text, and &l turns on bold.
+# Put the colour first and the bold after it. These pages sit on paper, so
+# dark colours read well and bright ones do not.
+
+index:
+  title: "Table games"
+  author: "The house"
+  pages:
+    - "#6b3f1d&lTable games\n\n#232323Four games here. This book says what each one is. For the rules of one of them, type /games help and its name.\n\nSo: /games help blackjack"
+    - "#6b3f1d&lBlackjack\n\n#232323You against the house. Get closer to 21 than the dealer without going over.\n\nQuick, no reading other people, and you can play it on your own.\n\n#6b3f1dhelp blackjack"
+    - "#6b3f1d&lTenceur Hold'em\n\n#232323Two cards each, five in the middle, and everyone plays for one pot.\n\nThe long game. You are playing the people, not the cards.\n\n#6b3f1dhelp poker"
+    - "#6b3f1d&lFive-Draw\n\n#232323Five cards each and nothing on show. Bet, swap the ones you hate, bet again.\n\nOlder and simpler than Hold'em. No board to read.\n\n#6b3f1dhelp draw"
+    - "#6b3f1d&lFree play\n\n#232323No rules and no rounds. Draw cards, throw money in the middle, sort it out yourselves.\n\nGood for anything the other three do not cover.\n\n#6b3f1dhelp freeplay"
+    - "#6b3f1d&lThings worth knowing\n\n#232323Only whole coins go on a table. Silver bits are no good.\n\nStay near the table. Wander off and your cards go back and your money comes home."
+
+blackjack:
+  title: "Blackjack"
+  author: "The house"
+  pages:
+    - "#6b3f1d&lBlackjack\n\n#232323Beat the dealer's hand without going past 21. That is the whole game.\n\nPicture cards are ten. An ace is one or eleven, whichever is kinder to you."
+    - "#6b3f1d&lPutting money down\n\n#232323While betting is open, right click your own spot on the felt holding coins. Click again to put more on.\n\nThat spot is your box and it is yours for the round."
+    - "#6b3f1d&lHow much\n\n#232323Every table sets its own smallest and biggest bet. They are written above the table, so read them before you sit down.\n\nSix people can play at once."
+    - "#6b3f1d&lYour turn\n\n#232323Wait for your name to come up. Then right click the shoe for another card, or say what you want in chat.\n\n#6b3f1dhit  stand  double  split"
+    - "#6b3f1d&lTalking to the table\n\n#232323Those words only count when it is actually your turn, so you can chat the rest of the time without betting the house by accident.\n\n/games bet hit does the same thing."
+    - "#6b3f1d&lDouble\n\n#232323Happy with two cards and want more on it? Say double. You match your bet, take exactly one more card, and that is your hand done.\n\nYou need the coins on you."
+    - "#6b3f1d&lSplit\n\n#232323Two cards of the same rank can be pulled apart into two hands, and you match your bet for the new one.\n\nKeep going and you can have four hands running at once."
+    - "#6b3f1d&lThe dealer's turn\n\n#232323Once everybody is done the dealer turns over the hidden card and keeps drawing until reaching 17, then stops there.\n\nNothing you can do at this point but watch."
+    - "#6b3f1d&lGetting paid\n\n#232323Beat the dealer and your bet comes back doubled.\n\n21 on your first two cards pays 3 to 2.\n\nDraw with the dealer and your money comes back."
+    - "#6b3f1d&lNo insurance\n\n#232323This house does not offer insurance and it does not offer surrender. If the dealer shows an ace, that is simply your problem.\n\nCoins land back on the felt when you win."
+    - "#6b3f1d&lDealing it yourself\n\n#232323Stand at the dealer's place and right click the shoe. The table is yours.\n\nRight click it again when you have had enough and somebody else can take over."
+    - "#6b3f1d&lRunning a round\n\n#232323/games bet min 10\n/games bet max 500\n/games bet open\n\n#232323Then let people put their money down."
+    - "#6b3f1d&lDealing it out\n\n#232323Once they have all bet:\n\n#6b3f1d/games bet close\n\n#232323Then right click the shoe.\n\nAfter that the table plays itself."
+    - "#6b3f1d&lTables with no dealer\n\n#232323Some tables deal themselves. Betting opens on its own and a clock starts once the first real bet lands.\n\nNobody has to run it."
+    - "#6b3f1d&lTaking one over\n\n#232323If your guild owns a table that deals itself, you can still step in at the shoe between rounds and deal by hand.\n\nThe money is the guild's either way, so keep your own coins in your pocket."
+
+poker:
+  title: "Tenceur Hold'em"
+  author: "The house"
+  pages:
+    - "#6b3f1d&lTenceur Hold'em\n\n#232323Two cards that are yours alone, five face up in the middle that belong to everybody.\n\nBest five cards win the pot. You can use both of yours, one, or neither."
+    - "#6b3f1d&lSitting down\n\n#232323Right click the felt with coins. That is you in.\n\nOnce two of you are sat down, anyone at the table can right click the shoe and the cards come out."
+    - "#6b3f1d&lYour cards\n\n#232323Only you can see them. Left click one to have a proper look at it.\n\nPress your swap hands key to turn them face up for everyone. There is rarely a good reason to."
+    - "#6b3f1d&lThe button\n\n#232323Somebody has the button, and it says who above the table.\n\nIt decides who acts first, and it moves one seat along after every hand, so nobody is stuck with it."
+    - "#6b3f1d&lThe blinds\n\n#7a2f2fThe blinds written above the table are a guide. Nothing is taken from you automatically.\n\n#232323If the table plays blinds, whoever owes one puts the coins out themselves."
+    - "#6b3f1d&lBetting\n\n#232323Money on the felt first, words second. Push your coins out, then say what you are doing.\n\n#6b3f1dcheck  call  raise  fold"
+    - "#6b3f1d&lWhat those mean\n\n#232323check is nothing more from me.\ncall is match what is out there.\nraise is more than that.\nfold is I am out and my money stays."
+    - "#6b3f1d&lRaising\n\n#7a2f2fPut the coins down before you say raise.\n\n#232323The table looks at what you have actually got out this round, so saying it with nothing on the felt gets you nowhere."
+    - "#6b3f1d&lRunning short\n\n#232323Call with less than you need and you are in for what you could manage.\n\nYou stay in the hand for that much and the rest of the betting carries on without you."
+    - "#6b3f1d&lThe five cards\n\n#232323Three come at once, then a fourth, then a fifth, with betting after each lot.\n\nThey arrive on their own. Nobody has to turn them."
+    - "#6b3f1d&lThe end of it\n\n#232323Everyone left shows their hand and the best five cards take the pot.\n\nSame hand as somebody else and you split it between you."
+    - "#6b3f1d&lIf they all fold\n\n#232323Last one still in takes the lot and never has to show anything.\n\nThat is allowed and it is often the point."
+    - "#6b3f1d&lTwo pots\n\n#232323If somebody was in for less than the rest, they can only win what they matched.\n\nThe extra goes to the best hand among those who paid it."
+    - "#6b3f1d&lWalking off\n\n#232323Step more than a few blocks from the table and you are out of the hand.\n\nWhat you put in this round comes back. What went in earlier does not."
+
+draw:
+  title: "Five-Draw"
+  author: "The house"
+  pages:
+    - "#6b3f1d&lFive-Draw\n\n#232323Five cards each, all hidden. Bet on them, throw away the bad ones for fresh ones, then bet again.\n\nBest five cards takes the pot."
+    - "#6b3f1d&lGetting dealt in\n\n#232323Right click the felt with coins to sit down.\n\nWith two of you there, anyone can right click the shoe and the cards come out one at a time."
+    - "#6b3f1d&lNo blinds\n\n#232323Nothing is taken off you before the cards land. No blinds, no ante.\n\nThe deck is shuffled properly every hand, so counting it gets you nothing."
+    - "#6b3f1d&lThe first bet\n\n#232323Coins on the felt, then say what you are doing.\n\n#6b3f1dcheck  call  raise  fold\n\n#232323Put the coins out before you say raise."
+    - "#6b3f1d&lThe draw\n\n#232323When it is your turn, click the cards you want rid of. They lift up so you can see what you picked.\n\nThen right click the shoe and you get that many back."
+    - "#6b3f1d&lKeeping all five\n\n#232323Pick nothing and say #6b3f1ddraw#232323 in chat instead. That stands you pat and passes it on.\n\n#7a2f2fThat one is chat only. There is no bet command for it."
+    - "#6b3f1d&lThe second bet\n\n#232323Once everyone has drawn there is one more round of betting, starting fresh.\n\nThis is where the swapping tells you something. Watch who took four."
+    - "#6b3f1d&lShowing\n\n#232323Everyone still in turns their five over and the best hand wins.\n\nSame hand as somebody else and the pot splits. If they all folded, the last one in takes it quietly."
+    - "#6b3f1d&lThe button\n\n#232323It says above the table who has it. It sets who goes first, both for betting and for drawing.\n\nIt shifts one seat along after each hand."
+
+freeplay:
+  title: "Free play"
+  author: "The house"
+  pages:
+    - "#6b3f1d&lFree play\n\n#232323A table with no rules in it. No rounds, no turns, no dealer, nobody checking anything.\n\nCards and money. What you do with them is between you."
+    - "#6b3f1d&lCards\n\n#232323Right click the shoe with an empty hand and you get one.\n\nClick a card in your hand to look at it. Press your swap hands key to show your hand to everyone."
+    - "#6b3f1d&lPutting them back\n\n#232323Click the cards you are done with, then right click the shoe and they go on the discard pile.\n\nNo limit on how many you hold."
+    - "#6b3f1d&lThe pot\n\n#232323Right click the felt with coins to add to the middle. Anything the table allows can go in.\n\nHow it gets won is up to whatever you all agreed."
+    - "#6b3f1d&lTaking the pot\n\n#232323Sneak and right click the shoe and the whole middle comes to you.\n\n#7a2f2fNothing stops you doing that, so only play here with people you trust."
+    - "#6b3f1d&lOdd things\n\n#232323To put something in that is not coins, hold it and type /wager and the amount. The table votes on whether it counts."

@@ -56,6 +56,8 @@ hand:
   sit-edge: 0.45
   # Onto the table from that rim (selected adds selected-distance minus distance).
   sit-inset: 0.12
+  # Sideways gap between split hand groups. Groups are centered on the player.
+  split-group-gap: 0.35
   # Ticks between each card in an F-key reveal/hide.
   reveal-stagger: 4
   # Ticks for the 180 sandwich flip.
@@ -99,6 +101,10 @@ wager:
   payout-ticks: 10
   # Loot /wager <n>: 1 auto-accepts if nobody else has bought in.
   min-players: 1
+  # Log every denar movement (bank, tray, felt, player) to the console.
+  audit-log: true
+  # Draw chips on the felt. Money lives in the table ledger either way.
+  show-chips: true
   gold:
     # Same flatten as cards (pitch -90). 3d: true adds another -90.
     item: ia.tfmc:gold_coin

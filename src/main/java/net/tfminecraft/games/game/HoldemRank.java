@@ -2,6 +2,7 @@ package net.tfminecraft.games.game;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
 
 import net.tfminecraft.games.cache.Cache;
@@ -17,17 +18,35 @@ final class HoldemRank {
     static final class Score implements Comparable<Score> {
 
         private final int[] keys;
+        private final List<Card> cards;
 
-        private Score(int[] keys) {
+        private Score(int[] keys, List<Card> cards) {
             this.keys = keys;
+            this.cards = cards;
         }
 
         static Score none() {
-            return new Score(new int[] {-1, 0, 0, 0, 0, 0});
+            return new Score(new int[] {-1, 0, 0, 0, 0, 0}, List.of());
         }
 
         static Score of(int category, int a, int b, int c, int d, int e) {
-            return new Score(new int[] {category, a, b, c, d, e});
+            return new Score(new int[] {category, a, b, c, d, e}, List.of());
+        }
+
+        /**
+         * The same score, remembering which five cards made it, high card first. Copied because
+         * the search reuses one array for every combination it tries.
+         */
+        Score withCards(String gameId, Card[] five) {
+            List<Card> held = new ArrayList<>(Arrays.asList(five));
+            held.sort(Comparator.comparingInt(
+                    (Card card) -> Cache.sortValue(gameId, card.getRank())).reversed());
+            return new Score(keys, List.copyOf(held));
+        }
+
+        /** The five that scored, high card first, or empty when there was no hand to score. */
+        List<Card> cards() {
+            return cards;
         }
 
         @Override
@@ -58,6 +77,7 @@ final class HoldemRank {
             return Score.none();
         }
         Score best = Score.none();
+        Card[] winner = null;
         int n = usable.size();
         Card[] pick = new Card[5];
         for (int a = 0; a < n; a++) {
@@ -73,13 +93,14 @@ final class HoldemRank {
                             Score next = ofFive(gameId, pick);
                             if (next.compareTo(best) > 0) {
                                 best = next;
+                                winner = pick.clone();
                             }
                         }
                     }
                 }
             }
         }
-        return best;
+        return winner == null ? best : best.withCards(gameId, winner);
     }
 
     private static Score ofFive(String gameId, Card[] five) {

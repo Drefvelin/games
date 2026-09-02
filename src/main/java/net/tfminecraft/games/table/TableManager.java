@@ -14,6 +14,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -24,7 +25,6 @@ import java.util.OptionalInt;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
-import java.util.function.Predicate;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
@@ -35,6 +35,7 @@ import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
+import org.bukkit.entity.TextDisplay;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
@@ -83,15 +84,24 @@ import net.tfminecraft.games.layout.TableLayout;
 import net.tfminecraft.games.layout.TablePileLayout;
 import net.tfminecraft.games.loader.CardLoader;
 import net.tfminecraft.games.utils.BodyYaw;
+import net.tfminecraft.games.wager.Accounts;
 import net.tfminecraft.games.wager.ChipItems;
+import net.tfminecraft.games.wager.LedgerAudit;
+import net.tfminecraft.games.wager.MoneyAccount;
+import net.tfminecraft.games.wager.MoneyLog;
+import net.tfminecraft.games.wager.MoneyTx;
 import net.tfminecraft.games.wager.PotLayout;
 import net.tfminecraft.games.wager.PotPile;
+import net.tfminecraft.games.wager.Stake;
+import net.tfminecraft.games.wager.TxResult;
 import net.tfminecraft.games.wager.WagerChat;
+import net.tfminecraft.games.wager.WagerEngine;
+import net.tfminecraft.games.wager.WagerHost;
 import net.tfminecraft.games.wager.WagerPileStyle;
 import net.tfminecraft.games.wager.WagerVote;
 import net.tfminecraft.games.voice.RpNames;
 
-public final class TableManager implements Listener {
+public final class TableManager implements Listener, WagerHost {
 
     private static final TableManager INSTANCE = new TableManager();
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
@@ -106,6 +116,8 @@ public final class TableManager implements Listener {
     private static final long INSPECT_TICKS = 5L;
 
     private final Map<UUID, Table> tables = new HashMap<>();
+    /** Table id to owner to floating amount label, only used when chips are hidden. */
+    private final Map<UUID, Map<UUID, UUID>> bucketLabels = new HashMap<>();
     private final Map<UUID, PlaceArm> arms = new HashMap<>();
     private final Map<UUID, LootArm> lootArms = new HashMap<>();
     private final Map<UUID, Long> selectCooldown = new HashMap<>();
@@ -124,10 +136,45 @@ public final class TableManager implements Listener {
     private BukkitTask handClock;
     private int handTicks;
 
-    private TableManager() {}
+    private TableManager() {
+        WagerEngine.init(this);
+    }
 
     public static TableManager get() {
         return INSTANCE;
+    }
+
+    private static WagerEngine wager() {
+        return WagerEngine.get();
+    }
+
+    // ------------------------------------------------------- WagerHost
+
+    /**
+     * Everything the money engine needs from a table. Redrawing and saving happen here, once,
+     * after a transaction has finished moving money, rather than inside each movement.
+     */
+    @Override
+    public Location anchorFor(Table table, UUID owner) {
+        return boxLocation(table, owner);
+    }
+
+    @Override
+    public void moneyMoved(Table table, Collection<UUID> buckets) {
+        if (table == null) {
+            return;
+        }
+        for (UUID owner : buckets) {
+            syncBucketChips(table, owner);
+        }
+        save(table);
+        notifyFeltPiles(table);
+    }
+
+    @Override
+    public List<PayoutFlight> flights(Table table, List<Stake> stakes, Location from, UUID destId,
+            boolean toTray) {
+        return makeFlights(table, stakes, from, destId, toTray);
     }
 
     public void startClock() {
@@ -148,6 +195,7 @@ public final class TableManager implements Listener {
     private void tickHands() {
         handTicks++;
         for (Table table : tables.values()) {
+            tickAway(table);
             Map<UUID, List<HandCard>> hands = table.getHands();
             if (hands.isEmpty()) {
                 continue;
@@ -161,7 +209,6 @@ public final class TableManager implements Listener {
                 if (player == null || !player.isOnline()) {
                     continue;
                 }
-                leaveIfAtTable(player, false);
                 List<HandCard> still = table.getHands().get(playerId);
                 if (still == null || still.isEmpty()) {
                     continue;
@@ -248,9 +295,11 @@ public final class TableManager implements Listener {
                     continue;
                 }
                 tables.put(table.getId(), table);
+                migrateLegacyPiles(table, data);
+                LedgerAudit.checkLoaded(table, storedDenars(data));
                 try {
                     boolean stale = (data.actives != null && !data.actives.isEmpty())
-                            || (data.piles != null && !data.piles.isEmpty());
+                            || !table.ledger().isEmpty();
                     if (stale) {
                         resetTableToIdle(table, table.getOrigin());
                     }
@@ -306,6 +355,19 @@ public final class TableManager implements Listener {
             table.getDeck().reshuffleAll();
         }
         save(table);
+    }
+
+    /** Draw every table's chips again, for a config reload. */
+    public void redrawAllChips() {
+        for (Table table : tables.values()) {
+            try {
+                syncAllChips(table);
+                notifyFeltPiles(table);
+            } catch (RuntimeException ex) {
+                Games.plugin.getLogger().warning("[Games] Failed to redraw chips for table "
+                        + table.getId() + ": " + ex.getMessage());
+            }
+        }
     }
 
     public void rebuildAllStacks() {
@@ -632,7 +694,7 @@ public final class TableManager implements Listener {
             ensureAnchors(table);
             rebuildCardStacks(table);
             rebuildTablePiles(table);
-            rebuildPiles(table);
+            syncAllChips(table);
         }
     }
 
@@ -670,7 +732,7 @@ public final class TableManager implements Listener {
         }
         rebuildCardStacks(table);
         rebuildTablePiles(table);
-        rebuildPiles(table);
+        syncAllChips(table);
         ensureAnchors(table);
         Game ready = gameOf(table);
         if (ready != null) {
@@ -725,7 +787,7 @@ public final class TableManager implements Listener {
         Game game = gameOf(table);
         boolean stockDealer = game == null || game.showStockDealer();
         if (stockDealer) {
-            if (auto) {
+            if (auto && dealer == null) {
                 text.append("\n").append(Messages.get("label.dealer", "name", "Auto"));
             } else if (dealer != null) {
                 text.append("\n").append(Messages.get("label.dealer", "name", RpNames.of(dealer)));
@@ -765,7 +827,7 @@ public final class TableManager implements Listener {
                 table.setDealerId(null);
                 Game game = gameOf(table);
                 if (game != null) {
-                    game.onTableReady(table);
+                    game.onDealerGone(table);
                 } else {
                     refreshLabel(table);
                 }
@@ -1151,6 +1213,7 @@ public final class TableManager implements Listener {
         despawnHands(table);
         despawnTablePiles(table, true);
         despawnPiles(table);
+        clearBucketLabels(table);
         for (UUID token : table.getStackTokens()) {
             DisplayManager.get().despawn(token);
         }
@@ -1229,12 +1292,7 @@ public final class TableManager implements Listener {
         }
         UUID owner = player.getUniqueId();
         int street = table.street();
-        int value = 0;
-        for (PotPile pile : table.getPiles()) {
-            if (owner.equals(pile.ownerId()) && pile.streetId() == street) {
-                value += pile.contribution();
-            }
-        }
+        int value = table.ledger().total(owner, street);
         Game game = GamesRegistry.of(table.getGameId());
         int need = game != null ? Math.max(0, game.denarsToMatch(table, player)) : 0;
         if (value < need) {
@@ -1296,17 +1354,24 @@ public final class TableManager implements Listener {
         if (table == null) {
             return false;
         }
+        return !boxOwners(table).isEmpty();
+    }
+
+    /** Everyone with money on the felt: not the tray, not the dealer's own chips. */
+    public List<UUID> boxOwners(Table table) {
+        List<UUID> out = new ArrayList<>();
+        if (table == null) {
+            return out;
+        }
         UUID dealer = table.dealerId();
-        for (PotPile pile : table.getPiles()) {
-            UUID owner = pile.ownerId();
-            if (owner == null || owner.equals(dealer)) {
+        UUID house = table.getId();
+        for (UUID owner : table.ledger().owners()) {
+            if (owner.equals(house) || owner.equals(dealer)) {
                 continue;
             }
-            if (pile.pieces() > 0 || pile.count() > 0) {
-                return true;
-            }
+            out.add(owner);
         }
-        return false;
+        return out;
     }
 
     /** True if a player box (non-tray) has at least minBet on the felt. */
@@ -1315,18 +1380,8 @@ public final class TableManager implements Listener {
             return false;
         }
         int min = table.minBet();
-        UUID dealer = table.dealerId();
-        UUID house = table.getId();
-        HashSet<UUID> seen = new HashSet<>();
-        for (PotPile pile : table.getPiles()) {
-            UUID owner = pile.ownerId();
-            if (owner == null || owner.equals(dealer) || owner.equals(house) || isTrayPile(table, pile)) {
-                continue;
-            }
-            if (!seen.add(owner)) {
-                continue;
-            }
-            if (ownedDenars(table, owner) >= min) {
+        for (UUID owner : boxOwners(table)) {
+            if (table.ledger().total(owner) >= min) {
                 return true;
             }
         }
@@ -1337,15 +1392,13 @@ public final class TableManager implements Listener {
         if (table == null || owner == null) {
             return 0;
         }
-        int sum = 0;
-        for (PotPile pile : table.getPiles()) {
-            if (owner.equals(pile.ownerId()) && !isTrayPile(table, pile)) {
-                sum += pile.contribution();
-            }
-        }
-        return sum;
+        return table.ledger().total(owner);
     }
 
+    /**
+     * Where this owner's chips are drawn. The ledger remembers the spot they first bet on,
+     * so it survives a payout that leaves them with nothing on the felt.
+     */
     public Location boxLocation(Table table, UUID owner) {
         if (table == null) {
             return null;
@@ -1355,195 +1408,147 @@ public final class TableManager implements Listener {
         if (owner == null) {
             return fallback;
         }
-        double x = 0;
-        double z = 0;
-        int n = 0;
-        for (PotPile pile : table.getPiles()) {
-            if (!owner.equals(pile.ownerId()) || isTrayPile(table, pile)) {
-                continue;
-            }
-            x += pile.x();
-            z += pile.z();
-            n++;
+        if (owner.equals(table.getId())) {
+            Location tray = layout != null ? layout.trayLocation(table) : null;
+            return tray != null ? tray : fallback;
         }
-        if (n < 1) {
-            Player online = owner != null ? Bukkit.getPlayer(owner) : null;
-            if (online != null && online.isOnline()) {
-                Location pad = betPadCenter(table, online);
-                if (pad != null) {
-                    return pad;
-                }
+        if (table.ledger().hasAnchor(owner)) {
+            Location at = table.getOrigin().clone();
+            at.setX(table.ledger().anchorX(owner));
+            at.setZ(table.ledger().anchorZ(owner));
+            return at;
+        }
+        Player online = Bukkit.getPlayer(owner);
+        if (online != null && online.isOnline()) {
+            Location pad = betPadCenter(table, online);
+            if (pad != null) {
+                return pad;
             }
-            return fallback;
+        }
+        return fallback;
+    }
+
+    /**
+     * Put money into a bucket, in whole units of the template item, and redraw its chips.
+     * Returns the denars actually added, which is always a whole number of coins.
+     */
+    /**
+     * Draw a bucket's chips from the ledger. Chips carry no value, so this can run whenever:
+     * it clears what is there and lays the stakes out again.
+     */
+    public void syncBucketChips(Table table, UUID owner) {
+        if (table == null || owner == null) {
+            return;
+        }
+        clearBucketChips(table, owner);
+        if (!Cache.wagerShowChips) {
+            return;
+        }
+        Location anchor = boxLocation(table, owner);
+        if (anchor == null) {
+            return;
+        }
+        boolean tray = owner.equals(table.getId());
+        int slot = 0;
+        for (Stake stake : table.ledger().stakes(owner)) {
+            ItemStack one = stake.item().clone();
+            one.setAmount(1);
+            WagerPileStyle style = ChipItems.pileStyle(one);
+            int per = Math.max(1, chipPieces(one));
+            int room = Math.max(1, PotLayout.room(0, style));
+            int left = stake.count();
+            Location spot = stakeSpot(table, stake);
+            int overflow = 0;
+            while (left > 0) {
+                int add = Math.max(1, Math.min(left, room / per));
+                Location at;
+                if (spot != null) {
+                    // A heap somebody put here. Anything taller than one stack piles up beside it.
+                    at = spreadSlot(table, spot, overflow++);
+                } else {
+                    at = tray ? nextTraySlot(table) : spreadSlot(table, anchor, slot++);
+                }
+                if (at == null) {
+                    return;
+                }
+                PotPile pile = new PotPile(owner, one.clone(), stake.typeKey(), stake.unit(),
+                        at.getX(), at.getZ());
+                pile.setPieces(add * per);
+                pile.setStreetId(stake.streetId());
+                if (!rebuildPile(table, pile)) {
+                    despawnPile(pile);
+                    return;
+                }
+                table.getPiles().add(pile);
+                left -= add;
+            }
+        }
+    }
+
+    /** Redraw every bucket, for load, chunk load, and the show-chips toggle. */
+    public void syncAllChips(Table table) {
+        if (table == null) {
+            return;
+        }
+        for (PotPile pile : new ArrayList<>(table.getPiles())) {
+            despawnPile(pile);
+        }
+        table.getPiles().clear();
+        for (UUID owner : table.ledger().owners()) {
+            syncBucketChips(table, owner);
+        }
+    }
+
+    private void clearBucketChips(Table table, UUID owner) {
+        for (PotPile pile : new ArrayList<>(table.getPiles())) {
+            if (owner.equals(pile.ownerId())) {
+                despawnPile(pile);
+                table.getPiles().remove(pile);
+            }
+        }
+    }
+
+    /**
+     * The spot a stake was put on, or null when nobody chose one and a layout decides instead.
+     * Bounds were checked when it was placed, so this is taken at face value.
+     */
+    private static Location stakeSpot(Table table, Stake stake) {
+        if (stake == null || !stake.placed() || table.getOrigin().getWorld() == null) {
+            return null;
         }
         Location at = table.getOrigin().clone();
-        at.setX(x / n);
-        at.setZ(z / n);
+        at.setX(stake.x());
+        at.setZ(stake.z());
         return at;
     }
 
-    public List<PotPile> detachDenars(Table table, Predicate<PotPile> filter, int need) {
-        List<PotPile> detached = new ArrayList<>();
-        if (table == null || filter == null || need < 1) {
-            return detached;
+    /** Chips past the first spill outwards from the bucket anchor. */
+    private Location spreadSlot(Table table, Location anchor, int index) {
+        if (index <= 0) {
+            return anchor.clone();
         }
-        int taken = 0;
-        List<PotPile> candidates = new ArrayList<>();
-        for (PotPile pile : table.getPiles()) {
-            if (filter.test(pile) && pile.denars() > 0 && pile.count() > 0) {
-                candidates.add(pile);
-            }
-        }
-        candidates.sort((a, b) -> Integer.compare(b.denars(), a.denars()));
-        for (PotPile pile : candidates) {
-            int peel = 0;
-            int peelPieces = 0;
-            while (pile.count() > 0 && pile.denars() <= need - taken) {
-                int per = Math.max(1, pile.pieces() / Math.max(1, pile.count()));
-                pile.setCount(pile.count() - 1);
-                pile.setPieces(Math.max(0, pile.pieces() - per));
-                peel++;
-                peelPieces += per;
-                taken += pile.denars();
-            }
-            if (peel < 1) {
-                continue;
-            }
-            if (pile.count() < 1) {
-                pile.setCount(peel);
-                pile.setPieces(peelPieces);
-                rebuildPile(table, pile);
-                detached.add(pile);
-            } else {
-                rebuildPile(table, pile);
-                ItemStack one = pile.item() != null ? pile.item().clone() : null;
-                if (one != null) {
-                    one.setAmount(1);
-                }
-                PotPile split = new PotPile(pile.ownerId(), one, pile.typeKey(), pile.denars(), peel, pile.x(),
-                        pile.z());
-                split.setPieces(peelPieces);
-                split.setStreetId(pile.streetId());
-                if (rebuildPile(table, split)) {
-                    table.getPiles().add(split);
-                    detached.add(split);
-                }
-            }
-            if (taken >= need) {
-                break;
-            }
-        }
-        save(table);
-        return detached;
+        double step = Math.max(0.12, Cache.wagerMergeRange);
+        int[] walk = spiralStep(index);
+        double forward = TableLayout.localForward(table, anchor) + walk[1] * step;
+        double right = TableLayout.localRight(table, anchor) + walk[0] * step;
+        return TableLayout.fromLocal(table, forward, right);
     }
 
-    public List<PotPile> spawnStoredPiles(Table table, UUID owner, ItemStack template, int denars, Location at) {
-        List<PotPile> spawned = new ArrayList<>();
-        if (table == null || owner == null || template == null || denars < 1) {
-            return spawned;
-        }
-        int unit = chipDenars(template);
-        if (unit < 1) {
-            return spawned;
-        }
-        int n = denars / unit;
-        if (n < 1) {
-            return spawned;
-        }
-        ItemStack one = template.clone();
-        one.setAmount(1);
-        Location hit = at != null ? at.clone() : table.getOrigin().clone();
-        hit.setY(table.getOrigin().getY());
-        int piece = Math.max(1, chipPieces(one));
-        String type = ChipItems.typeKey(one);
-        if (inTrayZone(table, hit)) {
-            spawned.addAll(placeTrayChips(table, owner, one, type, unit, n, piece));
-            save(table);
-            notifyFeltPiles(table);
-            return spawned;
-        }
-        PotPile pile = new PotPile(owner, one.clone(), type, unit, n, hit.getX(), hit.getZ());
-        pile.setPieces(n * piece);
-        pile.setStreetId(table.street());
-        if (rebuildPile(table, pile)) {
-            table.getPiles().add(pile);
-            spawned.add(pile);
-            playChipSound(table, hit);
-        }
-        save(table);
-        notifyFeltPiles(table);
-        return spawned;
-    }
-
-    private List<PotPile> placeTrayChips(Table table, UUID owner, ItemStack one, String type, int unit, int count,
-            int piece) {
-        List<PotPile> spawned = new ArrayList<>();
-        if (count < 1) {
-            return spawned;
-        }
-        WagerPileStyle style = ChipItems.pileStyle(one);
-        int left = count;
-        int leftPieces = count * Math.max(1, piece);
-        int per = Math.max(1, piece);
-        while (left > 0) {
-            PotPile merge = trayMerge(table, owner, type, unit, style);
-            if (merge != null) {
-                int room = PotLayout.room(merge.pieces(), style);
-                if (room < 1) {
-                    break;
-                }
-                int addPieces = Math.min(room, leftPieces);
-                int addCount = Math.min(left, Math.max(1, addPieces / per));
-                addPieces = addCount * per;
-                merge.addCount(addCount);
-                merge.addPieces(addPieces);
-                rebuildPile(table, merge);
-                left -= addCount;
-                leftPieces -= addPieces;
-                spawned.add(merge);
-                continue;
+    private static int[] spiralStep(int index) {
+        int x = 0;
+        int z = 0;
+        int dx = 0;
+        int dz = -1;
+        for (int n = 0; n < index; n++) {
+            if (x == z || (x < 0 && x == -z) || (x > 0 && x == 1 - z)) {
+                int t = dx;
+                dx = -dz;
+                dz = t;
             }
-            Location slot = nextTraySlot(table);
-            if (slot == null) {
-                break;
-            }
-            int room = Math.max(1, PotLayout.room(0, style));
-            int addPieces = Math.min(room, leftPieces);
-            int addCount = Math.min(left, Math.max(1, addPieces / per));
-            addPieces = addCount * per;
-            PotPile pile = new PotPile(owner, one.clone(), type, unit, addCount, slot.getX(), slot.getZ());
-            pile.setPieces(addPieces);
-            pile.setStreetId(table.street());
-            if (!rebuildPile(table, pile)) {
-                despawnPile(pile);
-                break;
-            }
-            table.getPiles().add(pile);
-            spawned.add(pile);
-            playChipSound(table, slot);
-            left -= addCount;
-            leftPieces -= addPieces;
+            x += dx;
+            z += dz;
         }
-        return spawned;
-    }
-
-    private PotPile trayMerge(Table table, UUID owner, String type, int unit, WagerPileStyle style) {
-        PotPile best = null;
-        int bestRoom = 0;
-        for (PotPile pile : table.getPiles()) {
-            if (!isTrayPile(table, pile) || !owner.equals(pile.ownerId())) {
-                continue;
-            }
-            if (!type.equals(pile.typeKey()) || pile.denars() != unit) {
-                continue;
-            }
-            int room = PotLayout.room(pile.pieces(), style);
-            if (room > bestRoom) {
-                best = pile;
-                bestRoom = room;
-            }
-        }
-        return best;
+        return new int[] {x, z};
     }
 
     private Location nextTraySlot(Table table) {
@@ -1573,20 +1578,8 @@ public final class TableManager implements Listener {
             return tray.clone();
         }
         double step = Math.max(0.12, Cache.wagerMergeRange);
-        int x = 0;
-        int z = 0;
-        int dx = 0;
-        int dz = -1;
-        for (int n = 0; n < index; n++) {
-            if (x == z || (x < 0 && x == -z) || (x > 0 && x == 1 - z)) {
-                int t = dx;
-                dx = -dz;
-                dz = t;
-            }
-            x += dx;
-            z += dz;
-        }
-        return TableLayout.fromLocal(table, origin.forward() + z * step, origin.right() + x * step);
+        int[] walk = spiralStep(index);
+        return TableLayout.fromLocal(table, origin.forward() + walk[1] * step, origin.right() + walk[0] * step);
     }
 
     private boolean traySlotTaken(Table table, Location slot) {
@@ -1609,89 +1602,13 @@ public final class TableManager implements Listener {
         if (table == null || owner == null) {
             return null;
         }
-        for (PotPile pile : table.getPiles()) {
-            if (owner.equals(pile.ownerId()) && !isTrayPile(table, pile) && pile.item() != null && pile.count() > 0) {
-                ItemStack one = pile.item().clone();
-                one.setAmount(1);
-                return one;
-            }
+        ItemStack template = table.ledger().template(owner);
+        if (template == null) {
+            return null;
         }
-        return null;
-    }
-
-    public boolean placeChipsFromInventory(Table table, Player player, int need) {
-        if (table == null || player == null || !player.isOnline() || need < 1) {
-            return false;
-        }
-        if (inventoryChipDenars(player) < need) {
-            return false;
-        }
-        Location at = boxLocation(table, player.getUniqueId());
-        if (at == null) {
-            return false;
-        }
-        int taken = 0;
-        ItemStack template = null;
-        ItemStack[] contents = player.getInventory().getContents();
-        for (int i = 0; i < contents.length; i++) {
-            ItemStack stack = contents[i];
-            while (stack != null && stack.getAmount() > 0 && taken < need) {
-                int value = chipDenars(stack);
-                if (value < 1 || value > need - taken) {
-                    break;
-                }
-                ItemStack one = stack.clone();
-                one.setAmount(1);
-                int pieces = chipPieces(stack);
-                if (!depositPieces(table, at, player.getUniqueId(), one, ChipItems.typeKey(one),
-                        ChipItems.pileStyle(one), value, 1, pieces)) {
-                    break;
-                }
-                if (template == null) {
-                    template = one;
-                }
-                taken += value;
-                playChipSound(table, at);
-                if (stack.getAmount() <= 1) {
-                    player.getInventory().setItem(i, null);
-                } else {
-                    stack.setAmount(stack.getAmount() - 1);
-                }
-                stack = player.getInventory().getItem(i);
-            }
-            if (taken >= need) {
-                break;
-            }
-        }
-        save(table);
-        if (taken >= need) {
-            notifyChipIn(table, player, taken, template);
-            return true;
-        }
-        return false;
-    }
-
-    private static int inventoryChipDenars(Player player) {
-        int sum = 0;
-        for (ItemStack stack : player.getInventory().getContents()) {
-            int value = chipDenars(stack);
-            if (value > 0 && stack != null) {
-                sum += value * stack.getAmount();
-            }
-        }
-        return sum;
-    }
-
-    private static int chipDenars(ItemStack stack) {
-        if (stack == null) {
-            return 0;
-        }
-        ChipItems.DecoChips deco = ChipItems.decoChips(stack);
-        if (deco != null) {
-            return deco.denars();
-        }
-        OptionalInt whole = ChipItems.integerDenars(stack);
-        return whole.isPresent() ? whole.getAsInt() : 0;
+        ItemStack one = template.clone();
+        one.setAmount(1);
+        return one;
     }
 
     private static int chipPieces(ItemStack stack) {
@@ -1702,108 +1619,24 @@ public final class TableManager implements Listener {
         return 1;
     }
 
-    public int takeDenarsFromInventory(Player player, int need) {
-        if (player == null || !player.isOnline() || need < 1) {
-            return 0;
-        }
-        int taken = 0;
-        ItemStack[] contents = player.getInventory().getContents();
-        for (int i = 0; i < contents.length; i++) {
-            ItemStack stack = contents[i];
-            OptionalInt value = ChipItems.integerDenars(stack);
-            if (value.isEmpty() || stack.getAmount() < 1) {
-                continue;
-            }
-            int each = value.getAsInt();
-            if (each < 1) {
-                continue;
-            }
-            int can = stack.getAmount();
-            while (can > 0 && each <= need - taken) {
-                can--;
-                taken += each;
-            }
-            if (can <= 0) {
-                player.getInventory().setItem(i, null);
-            } else if (can != stack.getAmount()) {
-                stack.setAmount(can);
-            }
-            if (taken >= need) {
-                break;
-            }
-        }
-        return taken;
+    /** Denars of one of these items. 0 when the item cannot hold a whole denar. */
+    public int chipUnitDenars(ItemStack stack) {
+        return ChipItems.unitDenars(stack);
     }
 
-    public boolean spawnPayChips(Table table, UUID owner, Location at, int denars) {
-        if (table == null || owner == null || denars < 1) {
-            return true;
-        }
-        ItemStack one = stubChipItem();
-        if (one == null) {
-            Player dest = Bukkit.getPlayer(owner);
-            return dest != null && dest.isOnline() && giveStubToInventory(dest, denars);
-        }
-        OptionalInt each = ChipItems.integerDenars(one);
-        int unit = each.isPresent() && each.getAsInt() > 0 ? each.getAsInt() : 1;
-        int count = denars / unit;
-        int leftover = denars - count * unit;
-        Location hit = at != null ? at : table.getOrigin().clone();
-        hit.setY(table.getOrigin().getY());
-        boolean ok = true;
-        if (count > 0) {
-            String type = ChipItems.typeKey(one);
-            PotPile pile = new PotPile(owner, one.clone(), type, unit, count, hit.getX(), hit.getZ());
-            pile.setPieces(count);
-            pile.setStreetId(table.street());
-            if (rebuildPile(table, pile)) {
-                table.getPiles().add(pile);
-            } else {
-                ok = false;
-                Player dest = Bukkit.getPlayer(owner);
-                if (dest != null && dest.isOnline()) {
-                    ItemStack give = one.clone();
-                    give.setAmount(count);
-                    dest.getInventory().addItem(give);
-                    ok = true;
-                }
-            }
-        }
-        save(table);
-        if (leftover > 0) {
-            Player dest = Bukkit.getPlayer(owner);
-            if (dest == null || !dest.isOnline() || !giveStubToInventory(dest, leftover)) {
-                ok = false;
-            }
-        }
-        return ok;
+    /** The house tray is just another bucket, keyed by the table itself. */
+    public UUID trayOwner(Table table) {
+        return table != null ? table.getId() : null;
     }
 
-    private static ItemStack stubChipItem() {
-        if (Cache.wagerGold == null || Cache.wagerGold.item() == null || Cache.wagerGold.item().isBlank()) {
-            return null;
-        }
-        ItemStack item = TLibs.getItemAPI().getCreator().getItemFromPath(Cache.wagerGold.item());
-        if (item == null) {
-            return null;
-        }
-        ItemStack one = item.clone();
-        one.setAmount(1);
-        return one;
+    /** Money sitting in the tray. */
+    public int trayDenars(Table table) {
+        return table == null ? 0 : table.ledger().total(table.getId());
     }
 
-    private static boolean giveStubToInventory(Player dest, int denars) {
-        ItemStack one = stubChipItem();
-        if (one == null || denars < 1) {
-            return false;
-        }
-        OptionalInt each = ChipItems.integerDenars(one);
-        int unit = each.isPresent() && each.getAsInt() > 0 ? each.getAsInt() : 1;
-        int count = Math.max(1, denars / unit);
-        ItemStack give = one.clone();
-        give.setAmount(count);
-        dest.getInventory().addItem(give);
-        return true;
+    /** Bank the auto tray without picking the table up. Used when a human takes the shoe. */
+    public void bankAutoTray(Table table) {
+        settleAutoTray(table, table != null ? table.getOrigin() : null);
     }
 
     public void beginSession(Table table) {
@@ -2069,6 +1902,7 @@ public final class TableManager implements Listener {
             return;
         }
         table.clearSession();
+        checkFeltEmpty(table, "session end");
         despawnTablePiles(table, true);
         rebuildCardStacks(table);
         save(table);
@@ -2159,7 +1993,13 @@ public final class TableManager implements Listener {
         if (table == null || house == null) {
             return;
         }
+        String wasGuild = table.ownerGuildId();
         house.apply(table);
+        if (!Objects.equals(wasGuild, table.ownerGuildId())) {
+            // A float belongs to the guild that put it up, so it cannot follow the table to a new
+            // owner and shelter their winnings from tax.
+            table.setHouseFloat(0);
+        }
         persistHouseChange(table);
     }
 
@@ -2198,6 +2038,7 @@ public final class TableManager implements Listener {
             }
         }
         table.setOwnerGuildId(data.ownerGuildId);
+        table.setHouseFloat(data.houseFloat != null ? data.houseFloat : 0);
         if (data.autoDealer == null) {
             boolean yaml = layout != null && layout.autoDealer();
             table.setAutoDealer(yaml);
@@ -2250,9 +2091,78 @@ public final class TableManager implements Listener {
     }
 
     private void notifyFeltPiles(Table table) {
+        syncBucketLabels(table);
         Game game = gameOf(table);
         if (game != null) {
             game.onFeltPilesChanged(table);
+        }
+    }
+
+    /**
+     * With chips hidden the felt would show nothing at all, so each bucket gets a floating
+     * amount at its anchor instead. With chips on, the stacks speak for themselves.
+     */
+    private void syncBucketLabels(Table table) {
+        if (table == null) {
+            return;
+        }
+        Map<UUID, UUID> labels = bucketLabels.computeIfAbsent(table.getId(), id -> new LinkedHashMap<>());
+        if (Cache.wagerShowChips) {
+            for (UUID label : labels.values()) {
+                WorldAnchors.remove(label);
+            }
+            labels.clear();
+            bucketLabels.remove(table.getId());
+            return;
+        }
+        Set<UUID> keep = new HashSet<>();
+        for (UUID owner : table.ledger().owners()) {
+            int value = table.ledger().total(owner);
+            if (value < 1) {
+                continue;
+            }
+            Location at = boxLocation(table, owner);
+            if (at == null || at.getWorld() == null) {
+                continue;
+            }
+            keep.add(owner);
+            String text = Messages.get("label.stake", "n", String.valueOf(value));
+            Location above = at.clone().add(0, 0.3, 0);
+            UUID id = labels.get(owner);
+            Entity entity = id != null ? Bukkit.getEntity(id) : null;
+            if (entity == null || entity.isDead() || !(entity instanceof TextDisplay)) {
+                WorldAnchors.remove(id);
+                TextDisplay spawned = WorldAnchors.spawnLabel(above, text);
+                if (spawned != null) {
+                    labels.put(owner, spawned.getUniqueId());
+                } else {
+                    labels.remove(owner);
+                }
+                continue;
+            }
+            WorldAnchors.setText(id, text);
+            WorldAnchors.move(id, above);
+        }
+        for (UUID owner : new ArrayList<>(labels.keySet())) {
+            if (!keep.contains(owner)) {
+                WorldAnchors.remove(labels.remove(owner));
+            }
+        }
+        if (labels.isEmpty()) {
+            bucketLabels.remove(table.getId());
+        }
+    }
+
+    /** Drop every amount label for a table, for pickup and shutdown. */
+    private void clearBucketLabels(Table table) {
+        if (table == null) {
+            return;
+        }
+        Map<UUID, UUID> labels = bucketLabels.remove(table.getId());
+        if (labels != null) {
+            for (UUID label : labels.values()) {
+                WorldAnchors.remove(label);
+            }
         }
     }
 
@@ -2347,48 +2257,113 @@ public final class TableManager implements Listener {
             }
             return;
         }
-        if (table.getPiles().isEmpty()) {
+        if (table.ledger().isEmpty()) {
             messageActives(table, Messages.get("wager.empty"));
             return;
         }
         table.actives().clear();
-        payoutPiles(table, winner, pile -> true);
+        payoutAll(table, winner);
     }
 
-    public void payoutPiles(Table table, Player winner, Predicate<PotPile> filter) {
-        if (table == null || filter == null) {
+    /** Every bucket goes to one winner. Manual flush and the admin pay command. */
+    public void payoutAll(Table table, Player winner) {
+        if (table == null) {
             return;
         }
-        UUID dest = winner != null ? winner.getUniqueId() : null;
-        List<PayoutFlight> assignments = new ArrayList<>();
-        for (PotPile pile : table.getPiles()) {
-            if (filter.test(pile)) {
-                assignments.add(new PayoutFlight(pile, dest));
-            }
+        List<PayoutFlight> flights = new ArrayList<>();
+        MoneyTx tx = wager().begin(table, "pot paid out").animate(flights);
+        for (UUID owner : wager().owners(table)) {
+            tx.moveAll(Accounts.bucket(table, owner), Accounts.payee(table, winner, owner));
         }
-        flushPiles(table, assignments, null);
+        tx.commit();
+        flushPiles(table, flights, null);
     }
 
     public void refundOwnedPiles(Table table, Player player) {
-        if (player == null) {
+        if (table == null || player == null) {
             return;
         }
+        List<PayoutFlight> flights = new ArrayList<>();
         UUID owner = player.getUniqueId();
-        refundPiles(table, player, pile -> owner.equals(pile.ownerId()));
+        wager().begin(table, "refund").animate(flights)
+                .moveAll(Accounts.bucket(table, owner), Accounts.payee(table, player, owner))
+                .commit();
+        wager().forget(table, owner);
+        flushPiles(table, flights, null);
     }
 
-    public void refundPiles(Table table, Player player, Predicate<PotPile> filter) {
-        if (table == null || player == null || filter == null) {
+    /**
+     * Take money out of a bucket and hand it over as items, with a throwaway chip stack
+     * flying to the destination. Pass {@code denars <= 0} to empty the bucket.
+     * Returns the denars actually paid, which is always a whole number of coins.
+     */
+    /** Every bucket except the house tray. In poker this is the pot. */
+    public List<UUID> potOwners(Table table) {
+        return wager().potOwners(table);
+    }
+
+    /**
+     * Nothing should be left on the felt once a hand is over. Logs loudly if it is, which is
+     * the alarm for money that failed to move.
+     */
+    public void checkFeltEmpty(Table table, String stage) {
+        if (table == null || !Cache.wagerAuditLog) {
             return;
         }
-        UUID dest = player.getUniqueId();
-        List<PayoutFlight> assignments = new ArrayList<>();
-        for (PotPile pile : table.getPiles()) {
-            if (filter.test(pile)) {
-                assignments.add(new PayoutFlight(pile, dest));
+        int left = table.ledger().totalExcept(table.getId());
+        if (left == 0) {
+            return;
+        }
+        StringBuilder detail = new StringBuilder();
+        for (Map.Entry<UUID, Integer> entry : table.ledger().totalsExcept(table.getId()).entrySet()) {
+            detail.append(' ').append(entry.getKey()).append('=').append(entry.getValue());
+        }
+        MoneyLog.mismatch(table, stage + " left " + left + " denars on the felt, tray="
+                + trayDenars(table) + ", buckets:" + detail);
+    }
+
+    /**
+     * Chips drawn only to be animated. They are not part of any bucket and hold no value,
+     * so the flight can throw them away when it lands.
+     */
+    private List<PayoutFlight> makeFlights(Table table, List<Stake> stakes, Location from, UUID destId,
+            boolean toTray) {
+        List<PayoutFlight> flights = new ArrayList<>();
+        if (!Cache.wagerShowChips || from == null || stakes == null) {
+            return flights;
+        }
+        int slot = 0;
+        for (Stake stake : stakes) {
+            if (stake.count() < 1 || stake.item() == null) {
+                continue;
+            }
+            ItemStack one = stake.item().clone();
+            one.setAmount(1);
+            WagerPileStyle style = ChipItems.pileStyle(one);
+            int per = Math.max(1, chipPieces(one));
+            int room = Math.max(1, PotLayout.room(0, style));
+            int left = stake.count();
+            // Chips fly off the heap that actually paid, falling back to the bucket spot for
+            // money the house put down and never placed anywhere in particular.
+            Location spot = stakeSpot(table, stake);
+            int overflow = 0;
+            while (left > 0) {
+                int add = Math.max(1, Math.min(left, room / per));
+                Location at = spot != null ? spreadSlot(table, spot, overflow++)
+                        : spreadSlot(table, from, slot++);
+                PotPile pile = new PotPile(destId, one.clone(), stake.typeKey(), stake.unit(),
+                        at.getX(), at.getZ());
+                pile.setPieces(add * per);
+                pile.setStreetId(stake.streetId());
+                if (!rebuildPile(table, pile)) {
+                    despawnPile(pile);
+                    return flights;
+                }
+                flights.add(toTray ? PayoutFlight.toTray(pile) : new PayoutFlight(pile, destId));
+                left -= add;
             }
         }
-        flushPiles(table, assignments, null);
+        return flights;
     }
 
     public void flushPiles(Table table, List<PayoutFlight> assignments, Runnable onDone) {
@@ -2406,19 +2381,9 @@ public final class TableManager implements Listener {
             }
             return;
         }
-        if (table.isPaying()) {
-            Set<UUID> told = new HashSet<>();
-            for (PayoutFlight flight : assignments) {
-                if (flight == null || flight.destId() == null || !told.add(flight.destId())) {
-                    continue;
-                }
-                Player dest = Bukkit.getPlayer(flight.destId());
-                if (dest != null && dest.isOnline()) {
-                    dest.sendMessage(Messages.get("wager.paying"));
-                }
-            }
-            return;
-        }
+        // A wave already in the air must land before this one starts, or its chips would be
+        // dropped from the flying list and left hanging over the table.
+        Runnable pending = finishPayoutNow(table);
         IdentityHashMap<PotPile, PayoutFlight> dests = new IdentityHashMap<>();
         for (PayoutFlight flight : assignments) {
             if (flight == null || flight.pile() == null) {
@@ -2430,6 +2395,7 @@ public final class TableManager implements Listener {
             if (onDone != null) {
                 onDone.run();
             }
+            runPending(pending);
             return;
         }
         List<PotPile> keep = new ArrayList<>();
@@ -2442,18 +2408,14 @@ public final class TableManager implements Listener {
         table.getPiles().addAll(keep);
         save(table);
         startPayoutFlight(table, new ArrayList<>(dests.values()), onDone);
+        // Last, so a callback that flushes again sees this wave and lands it properly.
+        runPending(pending);
     }
 
-    public void setPilesCommunal(Table table, Predicate<PotPile> filter) {
-        if (table == null || filter == null) {
-            return;
+    private static void runPending(Runnable pending) {
+        if (pending != null) {
+            pending.run();
         }
-        for (PotPile pile : table.getPiles()) {
-            if (filter.test(pile)) {
-                pile.setOwnerId(null);
-            }
-        }
-        save(table);
     }
 
     private void startPayoutFlight(Table table, List<PayoutFlight> snapshot, Runnable onDone) {
@@ -2587,34 +2549,14 @@ public final class TableManager implements Listener {
         }
     }
 
+    /**
+     * A landed flight is only chips arriving. The money moved before the animation started,
+     * so there is nothing to hand over here.
+     */
     private void settleFlight(Table table, PayoutFlight flight) {
         PotPile pile = flight.pile();
-        if (flight.stayOnTray()) {
-            despawnPile(pile);
-            ItemStack one = pile.item() != null ? pile.item().clone() : null;
-            if (one != null) {
-                one.setAmount(1);
-                int piece = Math.max(1, pile.count() > 0 ? Math.max(1, pile.pieces() / pile.count()) : 1);
-                int count = pile.count() > 0 ? pile.count() : pile.pieces();
-                if (count > 0) {
-                    placeTrayChips(table, table.getId(), one, pile.typeKey(), pile.denars(), count, piece);
-                }
-            }
-            save(table);
-            notifyFeltPiles(table);
-            Location tray = destLocation(table, flight);
-            playChipSound(table, tray);
-            return;
-        }
-        UUID destId = flight.destId();
-        Player dest = destId != null ? Bukkit.getPlayer(destId) : null;
-        Location dropAt = dest != null && dest.isOnline() ? dest.getLocation() : table.getOrigin();
         despawnPile(pile);
-        playChipSound(table, dropAt);
-        if (destId == null) {
-            return;
-        }
-        givePileItems(pile, dest, dropAt);
+        playChipSound(table, destLocation(table, flight));
     }
 
     private void finishPayoutWave(Table table, int gen) {
@@ -2642,16 +2584,22 @@ public final class TableManager implements Listener {
         return table != null && table.isPaying() && table.payoutGen() == gen;
     }
 
-    private void abortPayout(Table table) {
-        if (!table.isPaying()) {
-            return;
+    /**
+     * Land the wave that is in the air right now, skipping the rest of the animation.
+     * Returns the wave callback so the caller can run it once it is safe.
+     */
+    private Runnable finishPayoutNow(Table table) {
+        if (table == null || !table.isPaying()) {
+            return null;
         }
         table.bumpPayoutGen();
-        table.clearPayoutOnDone();
+        Runnable onDone = table.takePayoutOnDone();
         for (PayoutFlight flight : new ArrayList<>(table.payoutFlying())) {
             settleFlight(table, flight);
         }
         table.endPayout();
+        notifyFeltPiles(table);
+        return onDone;
     }
 
     public void voteWager(Player player, boolean accept) {
@@ -2861,7 +2809,6 @@ public final class TableManager implements Listener {
             player.sendMessage(Messages.get("wager.gone"));
             return false;
         }
-        consumeAmount(held, player, need);
         Location at = hit;
         if (at == null || at.getWorld() == null
                 || (!onPlayArea(table, player, at) && !isDealerTrayPlace(table, player.getUniqueId(), at))) {
@@ -2869,49 +2816,34 @@ public final class TableManager implements Listener {
             at = felt != null && felt.table() == table ? felt.hit() : fallbackFelt(table, player);
         }
         if (at == null || at.getWorld() == null) {
-            restoreItems(player, snapshot, need);
             player.sendMessage(Messages.get("wager.spawn_failed"));
             return false;
         }
         if (inShoeZone(table, at)
                 || (inTrayZone(table, at) && !isDealerTrayPlace(table, player.getUniqueId(), at))) {
-            restoreItems(player, snapshot, need);
             player.sendMessage(Messages.get("wager.no_bet_zone"));
             return false;
         }
         boolean dealerTray = isDealerTrayPlace(table, player.getUniqueId(), at);
+        if (dealerTray && refuseTrayStock(table, player)) {
+            return false;
+        }
         int placeDenars = denars * need;
         if (!dealerTray && refuseBlackjackPlace(player, table, player.getUniqueId(), placeDenars)) {
-            restoreItems(player, snapshot, need);
             return false;
         }
         ItemStack one = snapshot.clone();
         one.setAmount(1);
-        String type = ChipItems.typeKey(one);
-        WagerPileStyle style = ChipItems.pileStyle(one);
-        int remaining = need;
-        while (remaining > 0) {
-            PotPile merge = nearestMerge(table, type, style, at, denars, player.getUniqueId(), table.street());
-            if (merge != null) {
-                merge.addOne();
-                if (!rebuildPile(table, merge)) {
-                    merge.setCount(merge.count() - 1);
-                    rebuildPile(table, merge);
-                    restoreItems(player, snapshot, remaining);
-                    player.sendMessage(Messages.get("wager.spawn_failed"));
-                    return false;
-                }
-            } else {
-                PotPile pile = new PotPile(player.getUniqueId(), one.clone(), type, denars, 1, at.getX(), at.getZ());
-                pile.setStreetId(table.street());
-                if (!rebuildPile(table, pile)) {
-                    restoreItems(player, snapshot, remaining);
-                    player.sendMessage(Messages.get("wager.spawn_failed"));
-                    return false;
-                }
-                table.getPiles().add(pile);
-            }
-            remaining--;
+        UUID bucket = dealerTray ? table.getId() : player.getUniqueId();
+        // The items leave the player's hands as part of the same movement that stakes them, so
+        // a wager that cannot be placed never eats the loot.
+        TxResult staked = wager().begin(table, dealerTray ? "dealer tray loot" : "loot wager")
+                .move(Accounts.declared(table, player, one, denars),
+                        Accounts.bucket(table, bucket).placedAt(at), placeDenars)
+                .commit();
+        if (!staked.ok() || staked.moved() < 1) {
+            player.sendMessage(Messages.get("wager.gone"));
+            return false;
         }
         playChipSound(table, at);
         if (!dealerTray) {
@@ -2919,35 +2851,8 @@ public final class TableManager implements Listener {
             save(table);
             tryBeginSession(table);
             notifyChipIn(table, player, need, one);
-        } else {
-            save(table);
         }
         return true;
-    }
-
-    private static void restoreItems(Player player, ItemStack snapshot, int amount) {
-        if (amount <= 0) {
-            return;
-        }
-        ItemStack back = snapshot.clone();
-        back.setAmount(amount);
-        HashMap<Integer, ItemStack> leftover = player.getInventory().addItem(back);
-        Location loc = player.getLocation();
-        if (loc.getWorld() == null) {
-            return;
-        }
-        for (ItemStack extra : leftover.values()) {
-            loc.getWorld().dropItemNaturally(loc, extra);
-        }
-    }
-
-    private static void consumeAmount(ItemStack held, Player player, int amount) {
-        int have = held.getAmount();
-        if (have <= amount) {
-            player.getInventory().setItemInMainHand(null);
-        } else {
-            held.setAmount(have - amount);
-        }
     }
 
     private Set<UUID> eligibleVoters(Table table, UUID proposerId) {
@@ -3038,6 +2943,9 @@ public final class TableManager implements Listener {
             player.sendMessage(Messages.get("wager.no_bet_zone"));
             return true;
         }
+        if (dealerTray && refuseTrayStock(table, player)) {
+            return true;
+        }
         if (!dealerTray && "blackjack".equalsIgnoreCase(table.getGameId()) && (!table.betOpen() || table.live())) {
             player.sendMessage(Messages.get("bet.closed"));
             return true;
@@ -3057,47 +2965,57 @@ public final class TableManager implements Listener {
         }
         ItemStack one = held.clone();
         one.setAmount(1);
-        String type = ChipItems.typeKey(one);
-        WagerPileStyle style;
-        int denars;
-        int pieceAdd;
         ChipItems.DecoChips deco = ChipItems.decoChips(held);
-        if (deco != null) {
-            style = deco.style();
-            denars = deco.denars();
-            pieceAdd = deco.pieces();
-        } else {
-            OptionalInt whole = ChipItems.integerDenars(held);
-            if (whole.isEmpty()) {
-                if (ChipItems.isChipKind(held)) {
-                    player.sendMessage(Messages.get("wager.not_whole"));
-                    return true;
-                }
-                return false;
+        OptionalInt whole = deco != null ? OptionalInt.of(deco.denars())
+                : ChipItems.integerDenars(held);
+        if (whole.isEmpty()) {
+            if (ChipItems.isChipKind(held)) {
+                player.sendMessage(Messages.get("wager.not_whole"));
+                return true;
             }
-            style = ChipItems.pileStyle(one);
-            denars = whole.getAsInt();
-            pieceAdd = 1;
+            return false;
+        }
+        int denars = whole.getAsInt();
+        if (denars < 1) {
+            // Sub-denar coins (silver) cannot be staked, so never eat the item for nothing.
+            player.sendMessage(Messages.get("wager.not_whole"));
+            return true;
         }
         if (!dealerTray && refuseBlackjackPlace(player, table, player.getUniqueId(), denars)) {
             return true;
         }
-        if (!depositPieces(table, hit, player.getUniqueId(), one, type, style, denars, 1, pieceAdd)) {
-            player.sendMessage(Messages.get("wager.spawn_failed"));
+        UUID bucket = dealerTray ? table.getId() : player.getUniqueId();
+        // One coin of exactly this kind, picked out and staked as a single movement.
+        TxResult placed = wager().begin(table, dealerTray ? "dealer tray" : "bet")
+                .move(Accounts.pockets(table, player, one::isSimilar),
+                        Accounts.bucket(table, bucket).placedAt(hit), denars)
+                .commit();
+        if (!placed.ok() || placed.moved() < 1) {
             return true;
         }
         playChipSound(table, hit);
-        consumeOne(held, player);
         if (!dealerTray) {
             table.actives().add(player.getUniqueId());
             save(table);
             tryBeginSession(table);
             notifyChipIn(table, player, denars, one);
-        } else {
-            save(table);
         }
         lockHand(table, player, false);
         markSelectCooldown(player);
+        return true;
+    }
+
+    /**
+     * True when this dealer must not stock the tray by hand. On a backed table the house money is
+     * the bank's, so personal coins going in would be money the guild then banks as its own.
+     */
+    private static boolean refuseTrayStock(Table table, Player dealer) {
+        if (!GuildTables.houseBacked(table)) {
+            return false;
+        }
+        if (dealer != null) {
+            dealer.sendMessage(Messages.get("wager.tray_is_funded"));
+        }
         return true;
     }
 
@@ -3211,14 +3129,9 @@ public final class TableManager implements Listener {
         return layout != null && layout.inTrayZone(table, hit);
     }
 
+    /** Tray chips are the ones drawn for the table's own bucket, wherever they sit. */
     public boolean isTrayPile(Table table, PotPile pile) {
-        if (table == null || pile == null) {
-            return false;
-        }
-        Location at = table.getOrigin().clone();
-        at.setX(pile.x());
-        at.setZ(pile.z());
-        return inTrayZone(table, at);
+        return table != null && pile != null && table.getId().equals(pile.ownerId());
     }
 
     private static boolean isDealerTrayPlace(Table table, UUID ownerId, Location hit) {
@@ -3310,34 +3223,6 @@ public final class TableManager implements Listener {
         return Math.hypot(a.getX() - b.getX(), a.getZ() - b.getZ());
     }
 
-    private static PotPile nearestMerge(Table table, String type, WagerPileStyle style, Location hit, int denars,
-            UUID ownerId, int streetId) {
-        PotPile best = null;
-        double bestDist = Double.MAX_VALUE;
-        double max = Cache.wagerMergeRange;
-        double maxSq = max * max;
-        for (PotPile pile : table.getPiles()) {
-            if (!type.equals(pile.typeKey()) || pile.denars() != denars) {
-                continue;
-            }
-            if (!Objects.equals(ownerId, pile.ownerId()) || pile.streetId() != streetId) {
-                continue;
-            }
-            if (!PotLayout.canAdd(pile.pieces(), style)) {
-                continue;
-            }
-            double dx = pile.x() - hit.getX();
-            double dz = pile.z() - hit.getZ();
-            double distSq = dx * dx + dz * dz;
-            if (distSq > maxSq || distSq >= bestDist) {
-                continue;
-            }
-            best = pile;
-            bestDist = distSq;
-        }
-        return best;
-    }
-
     private boolean refuseBlackjackPlace(Player player, Table table, UUID ownerId, int placeDenars) {
         if (table == null || player == null || !"blackjack".equalsIgnoreCase(table.getGameId())) {
             return false;
@@ -3365,168 +3250,7 @@ public final class TableManager implements Listener {
     }
 
     private int countBlackjackBoxes(Table table) {
-        UUID dealer = table.dealerId();
-        UUID house = table.getId();
-        HashSet<UUID> seen = new HashSet<>();
-        for (PotPile pile : table.getPiles()) {
-            UUID owner = pile.ownerId();
-            if (owner == null || owner.equals(dealer) || owner.equals(house) || isTrayPile(table, pile)) {
-                continue;
-            }
-            if (ownedDenars(table, owner) > 0) {
-                seen.add(owner);
-            }
-        }
-        return seen.size();
-    }
-
-    private boolean depositPieces(Table table, Location hit, UUID ownerId, ItemStack one, String type,
-            WagerPileStyle style, int denars, int physical, int pieceAdd) {
-        if (pieceAdd < 1) {
-            return false;
-        }
-        if (inShoeZone(table, hit)
-                || (inTrayZone(table, hit) && !isDealerTrayPlace(table, ownerId, hit))) {
-            return false;
-        }
-        List<PotPile> created = new ArrayList<>();
-        Map<PotPile, int[]> snap = new HashMap<>();
-        int left = pieceAdd;
-        boolean physLeft = physical > 0;
-        Location at = hit.clone();
-        at.setY(table.getOrigin().getY());
-        PotPile last = null;
-        while (left > 0) {
-            PotPile merge = nearestMerge(table, type, style, at, denars, ownerId, table.street());
-            if (merge != null) {
-                snap.putIfAbsent(merge, new int[] {merge.count(), merge.pieces()});
-                int room = PotLayout.room(merge.pieces(), style);
-                if (room < 1) {
-                    return revertDeposit(table, created, snap);
-                }
-                int add = Math.min(room, left);
-                merge.addPieces(add);
-                if (physLeft) {
-                    merge.addCount(1);
-                    physLeft = false;
-                }
-                if (!rebuildPile(table, merge)) {
-                    return revertDeposit(table, created, snap);
-                }
-                left -= add;
-                last = merge;
-                at = pileAt(table, merge);
-                continue;
-            }
-            Location spawnAt = last == null ? at : overflowAway(table, last);
-            Player owner = ownerId != null ? Bukkit.getPlayer(ownerId) : null;
-            boolean onPad = owner != null && owner.isOnline()
-                    ? onPlayArea(table, owner, spawnAt)
-                    : onFelt(table, spawnAt);
-            if (spawnAt == null || (!onPad && !inTrayZone(table, spawnAt))) {
-                if (last != null) {
-                    last.addPieces(left);
-                    if (!rebuildPile(table, last)) {
-                        return revertDeposit(table, created, snap);
-                    }
-                    return true;
-                }
-                return revertDeposit(table, created, snap);
-            }
-            int room = PotLayout.room(0, style);
-            int add = Math.min(Math.max(1, room), left);
-            int phys = physLeft ? 1 : 0;
-            PotPile pile = new PotPile(ownerId, one.clone(), type, denars, phys, spawnAt.getX(), spawnAt.getZ());
-            pile.setPieces(add);
-            pile.setStreetId(table.street());
-            if (!rebuildPile(table, pile)) {
-                despawnPile(pile);
-                return revertDeposit(table, created, snap);
-            }
-            table.getPiles().add(pile);
-            created.add(pile);
-            physLeft = false;
-            left -= add;
-            last = pile;
-            at = spawnAt;
-        }
-        return true;
-    }
-
-    private boolean revertDeposit(Table table, List<PotPile> created, Map<PotPile, int[]> snap) {
-        for (PotPile pile : created) {
-            despawnPile(pile);
-            table.getPiles().remove(pile);
-        }
-        for (Map.Entry<PotPile, int[]> entry : snap.entrySet()) {
-            PotPile pile = entry.getKey();
-            if (created.contains(pile)) {
-                continue;
-            }
-            pile.setCount(entry.getValue()[0]);
-            pile.setPieces(entry.getValue()[1]);
-            rebuildPile(table, pile);
-        }
-        return false;
-    }
-
-    private static Location pileAt(Table table, PotPile pile) {
-        Location at = table.getOrigin().clone();
-        at.setX(pile.x());
-        at.setZ(pile.z());
-        return at;
-    }
-
-    private static Location overflowAway(Table table, PotPile from) {
-        Location origin = table.getOrigin();
-        double dx = from.x() - origin.getX();
-        double dz = from.z() - origin.getZ();
-        double dist = Math.hypot(dx, dz);
-        double step = Cache.wagerMergeRange;
-        Location hit = origin.clone();
-        if (dist < 1e-6) {
-            hit.setX(origin.getX() + Cache.wagerMinRange + step);
-            hit.setZ(origin.getZ());
-        } else {
-            double s = (dist + step) / dist;
-            hit.setX(origin.getX() + dx * s);
-            hit.setZ(origin.getZ() + dz * s);
-        }
-        hit.setY(origin.getY());
-        return clampOntoRing(table, hit);
-    }
-
-    private static Location clampOntoRing(Table table, Location loc) {
-        Location origin = table.getOrigin();
-        double dx = loc.getX() - origin.getX();
-        double dz = loc.getZ() - origin.getZ();
-        double dist = Math.hypot(dx, dz);
-        double min = Cache.wagerMinRange;
-        double max = Cache.wagerMaxRange;
-        Location hit = origin.clone();
-        if (dist < 1e-6) {
-            hit.setX(origin.getX() + min);
-            hit.setZ(origin.getZ());
-        } else if (dist < min) {
-            double s = min / dist;
-            hit.setX(origin.getX() + dx * s);
-            hit.setZ(origin.getZ() + dz * s);
-        } else if (dist > max) {
-            double s = max / dist;
-            hit.setX(origin.getX() + dx * s);
-            hit.setZ(origin.getZ() + dz * s);
-        } else {
-            hit.setX(loc.getX());
-            hit.setZ(loc.getZ());
-        }
-        hit.setY(origin.getY());
-        return hit;
-    }
-
-    private void rebuildPiles(Table table) {
-        for (PotPile pile : table.getPiles()) {
-            rebuildPile(table, pile);
-        }
+        return boxOwners(table).size();
     }
 
     private boolean rebuildPile(Table table, PotPile pile) {
@@ -3606,73 +3330,39 @@ public final class TableManager implements Listener {
     }
 
     private void refundStreet(Table table, Player player, int street) {
-        UUID owner = player.getUniqueId();
-        refundPiles(table, player, pile -> owner.equals(pile.ownerId()) && pile.streetId() == street);
-    }
-
-    private void givePileItems(PotPile pile, Player dest, Location dropAt) {
-        if (pile.count() <= 0 || pile.item() == null) {
+        if (table == null || player == null) {
             return;
         }
-        ItemStack give = pile.item().clone();
-        give.setAmount(pile.count());
-        World world = dropAt.getWorld();
-        if (dest != null && dest.isOnline()) {
-            HashMap<Integer, ItemStack> leftover = dest.getInventory().addItem(give);
-            if (world != null) {
-                for (ItemStack extra : leftover.values()) {
-                    world.dropItemNaturally(dropAt, extra);
-                }
-            }
-        } else if (world != null) {
-            world.dropItemNaturally(dropAt, give);
-        }
+        List<PayoutFlight> flights = new ArrayList<>();
+        wager().refundStreet(table, player.getUniqueId(), street, flights, "street refund");
+        flushPiles(table, flights, null);
     }
 
-    private void givePiles(Table table, Player picker, Location dropAt) {
-        despawnPiles(table);
-        for (PotPile pile : table.getPiles()) {
-            Player dest = pile.ownerId() != null ? Bukkit.getPlayer(pile.ownerId()) : null;
-            if (dest == null || !dest.isOnline()) {
-                dest = picker != null && picker.isOnline() ? picker : null;
-            }
-            givePileItems(pile, dest, dropAt);
-        }
-        table.getPiles().clear();
-    }
-
+    /**
+     * Hand every bucket back: players get their own stakes, the tray goes to the guild bank
+     * when the house funded it and to the dealer when a human did.
+     */
     private void clearFeltNow(Table table, Player fallback) {
         if (table == null) {
             return;
         }
         table.bumpPayoutGen();
         table.clearPayoutOnDone();
-        IdentityHashMap<PotPile, Boolean> seen = new IdentityHashMap<>();
-        List<PotPile> all = new ArrayList<>();
-        for (PotPile pile : table.getPiles()) {
-            if (pile != null && seen.put(pile, Boolean.TRUE) == null) {
-                all.add(pile);
-            }
-        }
-        for (PayoutFlight flight : new ArrayList<>(table.payoutFlying())) {
-            PotPile pile = flight != null ? flight.pile() : null;
-            if (pile != null && seen.put(pile, Boolean.TRUE) == null) {
-                all.add(pile);
-            }
-        }
-        Location dropAt = table.getOrigin() != null ? table.getOrigin().clone() : null;
-        for (PotPile pile : all) {
-            despawnPile(pile);
-            Player dest = pile.ownerId() != null ? Bukkit.getPlayer(pile.ownerId()) : null;
+        List<UUID> owners = wager().potOwners(table);
+        MoneyTx tx = wager().begin(table, "felt cleared");
+        for (UUID owner : owners) {
+            Player dest = Bukkit.getPlayer(owner);
             if (dest == null || !dest.isOnline()) {
                 dest = fallback != null && fallback.isOnline() ? fallback : null;
             }
-            if (dropAt == null && dest != null) {
-                dropAt = dest.getLocation();
-            }
-            if (dropAt != null) {
-                givePileItems(pile, dest, dropAt);
-            }
+            tx.moveAll(Accounts.bucket(table, owner), Accounts.payee(table, dest, owner));
+        }
+        tx.commit();
+        for (UUID owner : owners) {
+            wager().forget(table, owner);
+        }
+        for (PotPile pile : new ArrayList<>(table.getPiles())) {
+            despawnPile(pile);
         }
         table.getPiles().clear();
         table.endPayout();
@@ -3680,37 +3370,51 @@ public final class TableManager implements Listener {
     }
 
     /**
-     * Auto-dealer tray: staff mint is deleted; guild auto banks, or drops if the guild is gone.
+     * Empty the tray. Bank money the house put there, give a human dealer their own float back,
+     * and delete a staff mint float.
      */
     private void settleAutoTray(Table table, Location dropAt) {
-        if (table == null || !table.autoDealer()) {
+        if (table == null) {
             return;
         }
-        List<PotPile> piles = new ArrayList<>();
-        int tray = 0;
-        for (PotPile pile : new ArrayList<>(table.getPiles())) {
-            if (!isTrayPile(table, pile)) {
-                continue;
-            }
-            tray += pile.contribution();
-            piles.add(pile);
-        }
-        if (piles.isEmpty()) {
+        UUID house = table.getId();
+        if (table.ledger().total(house) < 1) {
             return;
         }
-        boolean drop = false;
-        if (!table.staffMint()) {
-            drop = !GuildTables.tryDeposit(table.ownerGuildId(), tray);
+        MoneyAccount tray = Accounts.tray(table);
+        MoneyAccount to;
+        String reason;
+        if (!GuildTables.houseBacked(table)) {
+            // Nothing behind this table but its dealer, so the float they stocked goes back to them.
+            Player dealer = table.dealerId() != null ? Bukkit.getPlayer(table.dealerId()) : null;
+            to = Accounts.payee(table, dealer, house);
+            reason = "dealer float returned";
+        } else {
+            to = Accounts.house(table);
+            reason = "tray settled";
         }
-        Location at = dropAt != null ? dropAt : (table.getOrigin() != null ? table.getOrigin().clone() : null);
-        for (PotPile pile : piles) {
-            despawnPile(pile);
-            if (drop && at != null) {
-                givePileItems(pile, null, at);
-            }
-            table.getPiles().remove(pile);
+        TxResult result = wager().begin(table, reason).moveAll(tray, to).commit();
+        if (!result.ok() || result.moved() < 1) {
+            // Nowhere to bank it, so it goes back out as coins rather than being lost.
+            wager().begin(table, "tray dropped, no guild bank")
+                    .moveAll(tray, Accounts.ground(table, dropAt))
+                    .commit();
         }
-        notifyFeltPiles(table);
+        wager().forget(table, house);
+    }
+
+    private void dropItems(ItemStack items, Location dropAt, Player dest) {
+        if (items == null || items.getAmount() < 1) {
+            return;
+        }
+        Location at = dropAt;
+        if (at == null && dest != null && dest.isOnline()) {
+            at = dest.getLocation();
+        }
+        if (at == null || at.getWorld() == null) {
+            return;
+        }
+        at.getWorld().dropItemNaturally(at, items);
     }
 
     private boolean trySelectCard(Player player) {
@@ -3932,12 +3636,13 @@ public final class TableManager implements Listener {
         Location origin = table.getOrigin();
         Location anchor = lockLocation(player, lock);
         int n = order.size();
+        int groups = slotSpan(order);
         List<DisplayPose> slots = new ArrayList<>(n);
         for (int i = 0; i < n; i++) {
             HandCard held = order.get(i);
             int groupSize = countInSlot(order, held.slot());
             int groupIndex = indexInSlot(order, held);
-            slots.add(playerFanPose(origin, anchor, lock, held.slot(), groupIndex, groupSize,
+            slots.add(playerFanPose(origin, anchor, lock, held.slot(), groups, groupIndex, groupSize,
                     held.isSelected(), 0f, extraPitch));
         }
         return slots;
@@ -4193,7 +3898,7 @@ public final class TableManager implements Listener {
         at.getWorld().playSound(at, Cache.cardSound, Cache.cardSoundVolume, Cache.cardSoundPitch);
     }
 
-    private void playChipSound(Table table, Location at) {
+    public void playChipSound(Table table, Location at) {
         if (at == null || at.getWorld() == null) {
             return;
         }
@@ -4244,11 +3949,12 @@ public final class TableManager implements Listener {
         HandLock lock = lockHand(table, player, false);
         Location origin = table.getOrigin();
         Location anchor = lockLocation(player, lock);
-        DisplayPose ownerEnd = playerFanPose(origin, anchor, lock, card.slot(), sortIndex, n,
+        int groups = slotSpan(hand);
+        DisplayPose ownerEnd = playerFanPose(origin, anchor, lock, card.slot(), groups, sortIndex, n,
                 card.isSelected(), 0f, HandLayout.FACE_UP_PITCH);
         DisplayPose otherEnd = revealedCardTokens.contains(card.tokenId())
                 ? ownerEnd
-                : playerFanPose(origin, anchor, lock, card.slot(), indexInSlot(hand, card), n,
+                : playerFanPose(origin, anchor, lock, card.slot(), groups, indexInSlot(hand, card), n,
                         card.isSelected(), 0f, HandLayout.FACE_UP_PITCH);
         DisplayPose startOwner = DisplayManager.get().poseOf(card.tokenId());
         DisplayPose startOther = DisplayManager.get().otherPoseOf(card.tokenId());
@@ -4381,7 +4087,9 @@ public final class TableManager implements Listener {
         save(table);
         HandLock lock = lockHand(table, player, true);
         Location anchor = lockLocation(player, lock);
-        DisplayPose fan = playerFanPose(table.getOrigin(), anchor, lock, destSlot, destIndex, destCount,
+        // The incoming card may be the first in a freshly split group, so it can widen the span.
+        int destGroups = Math.max(slotSpan(live), destSlot + 1);
+        DisplayPose fan = playerFanPose(table.getOrigin(), anchor, lock, destSlot, destGroups, destIndex, destCount,
                 false, 0f, HandLayout.FACE_UP_PITCH);
         DisplayPose otherFan = sortHeld(table)
                 ? HandLayout.fanSlot(live.size(), destCount, table.getOrigin(), anchor, lock.placeYaw(),
@@ -4623,24 +4331,44 @@ public final class TableManager implements Listener {
         return -1;
     }
 
-    private static DisplayPose playerFanPose(Location origin, Location anchor, HandLock lock, int slot, int index,
-            int count, boolean selected, float extraBump, float extraPitch) {
-        float extra = extraBump + (slot == 1 ? 0.1f : 0f);
+    /**
+     * One card of one hand group. A box holding several hands spreads its groups sideways around
+     * the player's anchor, so four blackjack hands read as four fans instead of one heap.
+     */
+    private static DisplayPose playerFanPose(Location origin, Location anchor, HandLock lock, int slot, int slots,
+            int index, int count, boolean selected, float extraBump, float extraPitch) {
+        int groups = Math.max(1, slots);
+        int group = Math.min(Math.max(0, slot), groups - 1);
+        if (groups < 2) {
+            return HandLayout.fanSlot(index, Math.max(1, count), origin, anchor, lock.placeYaw(),
+                    lock.sitting(), selected, extraBump, extraPitch);
+        }
+        // Later groups sit a touch nearer the shoe and a layer higher, as the second hand always has.
+        float extra = extraBump + group * 0.1f;
         DisplayPose pose = HandLayout.fanSlot(index, Math.max(1, count), origin, anchor, lock.placeYaw(),
                 lock.sitting(), selected, extra, extraPitch);
-        if (slot != 1) {
-            return pose;
-        }
-        var t = pose.translation();
+        double side = Cache.handSplitGroupGap * (group - (groups - 1) / 2.0);
         double yawRad = Math.toRadians(lock.placeYaw());
         double fx = -Math.sin(yawRad);
         double fz = Math.cos(yawRad);
         double rx = fz;
         double rz = -fx;
+        var t = pose.translation();
         return pose.withTranslation(
-                t.x + (float) (rx * 0.1),
-                t.y + Cache.stackLayerGap,
-                t.z + (float) (rz * 0.1));
+                t.x + (float) (rx * side),
+                t.y + group * Cache.stackLayerGap,
+                t.z + (float) (rz * side));
+    }
+
+    /** How many hand groups this list spans, so the groups can be centred on the player. */
+    private static int slotSpan(List<HandCard> hand) {
+        int max = 0;
+        if (hand != null) {
+            for (HandCard held : hand) {
+                max = Math.max(max, held.slot());
+            }
+        }
+        return max + 1;
     }
 
     private static float stackTopOffset(int layers) {
@@ -4744,6 +4472,7 @@ public final class TableManager implements Listener {
         HandLock lock = lockHand(table, player, forceHeading);
         Location anchor = lockLocation(player, lock);
         List<HandCard> order = handOrder(table, hand);
+        int groups = Math.max(slotSpan(order), extraSlots > 0 ? extraOnSlot + 1 : 0);
         Map<UUID, DisplayPose> ownerPoses = new HashMap<>();
         for (HandCard held : order) {
             int groupSlot = held.slot();
@@ -4756,7 +4485,7 @@ public final class TableManager implements Listener {
                 }
             }
             float extra = pulseToken != null && pulseToken.equals(held.tokenId()) ? INSPECT_BUMP : 0f;
-            ownerPoses.put(held.tokenId(), playerFanPose(origin, anchor, lock, groupSlot, index, n,
+            ownerPoses.put(held.tokenId(), playerFanPose(origin, anchor, lock, groupSlot, groups, index, n,
                     held.isSelected(), extra, HandLayout.FACE_UP_PITCH));
         }
         Map<UUID, DisplayPose> otherPoses = new HashMap<>();
@@ -4768,7 +4497,8 @@ public final class TableManager implements Listener {
                 otherIndex++;
             }
             float extra = pulseToken != null && pulseToken.equals(held.tokenId()) ? INSPECT_BUMP : 0f;
-            if (held.slot() != 0 || revealedCardTokens.contains(held.tokenId())) {
+            // The anonymous flat fan only makes sense for a single group, so split boxes show true spots.
+            if (groups > 1 || revealedCardTokens.contains(held.tokenId())) {
                 otherPoses.put(held.tokenId(), ownerPoses.get(held.tokenId()));
             } else {
                 otherPoses.put(held.tokenId(), HandLayout.fanSlot(
@@ -4781,7 +4511,7 @@ public final class TableManager implements Listener {
         UUID ownerId = player.getUniqueId();
         for (HandCard held : hand) {
             DisplayPose ownerPose = ownerPoses.get(held.tokenId());
-            DisplayPose otherPose = revealedCardTokens.contains(held.tokenId()) || held.slot() != 0
+            DisplayPose otherPose = revealedCardTokens.contains(held.tokenId()) || groups > 1
                     ? ownerPose
                     : otherPoses.get(held.tokenId());
             displays.setLayoutOwner(held.tokenId(), ownerId);
@@ -4867,38 +4597,72 @@ public final class TableManager implements Listener {
         return null;
     }
 
+    private void tickAway(Table table) {
+        Set<UUID> watch = new LinkedHashSet<>(table.actives());
+        watch.addAll(table.getHands().keySet());
+        if (table.dealerId() != null) {
+            watch.add(table.dealerId());
+        }
+        for (UUID playerId : watch) {
+            Player player = Bukkit.getPlayer(playerId);
+            if (player == null || !player.isOnline()) {
+                continue;
+            }
+            leaveIfAtTable(player, false);
+        }
+    }
+
+    private boolean stillNear(Table table, Player player) {
+        Location origin = table.getOrigin();
+        return origin.getWorld() != null && player.getWorld().equals(origin.getWorld())
+                && origin.distance(player.getLocation()) <= Cache.leaveDistanceOf(table.getGameId());
+    }
+
+    private Table tableWhereDealer(UUID playerId) {
+        for (Table table : tables.values()) {
+            if (playerId.equals(table.dealerId())) {
+                return table;
+            }
+        }
+        return null;
+    }
+
     private void leaveIfAtTable(Player player, boolean force) {
         Table table = tableHolding(player.getUniqueId());
         if (table != null) {
-            Location origin = table.getOrigin();
-            if (!force && origin.getWorld() != null && player.getWorld().equals(origin.getWorld())
-                    && origin.distance(player.getLocation()) <= Cache.leaveDistanceOf(table.getGameId())) {
+            if (!force && stillNear(table, player)) {
                 return;
             }
             returnHand(table, player, !force, true);
             return;
         }
         Table felt = tableWhereActive(player.getUniqueId());
-        if (felt == null) {
+        if (felt != null) {
+            if (!force && stillNear(felt, player)) {
+                return;
+            }
+            Game game = GamesRegistry.of(felt.getGameId());
+            if (game != null) {
+                game.onLeave(felt, player);
+                game.onChipIn(felt, player);
+            } else {
+                refundOwnedPiles(felt, player);
+                felt.actives().remove(player.getUniqueId());
+            }
+            if (felt.getHands().isEmpty()) {
+                recycleIfNeeded(felt, null);
+            }
+            save(felt);
             return;
         }
-        Location origin = felt.getOrigin();
-        if (!force && origin.getWorld() != null && player.getWorld().equals(origin.getWorld())
-                && origin.distance(player.getLocation()) <= Cache.leaveDistanceOf(felt.getGameId())) {
+        Table dealing = tableWhereDealer(player.getUniqueId());
+        if (dealing == null) {
             return;
         }
-        Game game = GamesRegistry.of(felt.getGameId());
-        if (game != null) {
-            game.onLeave(felt, player);
-            game.onChipIn(felt, player);
-        } else {
-            refundOwnedPiles(felt, player);
-            felt.actives().remove(player.getUniqueId());
+        if (!force && stillNear(dealing, player)) {
+            return;
         }
-        if (felt.getHands().isEmpty()) {
-            recycleIfNeeded(felt, null);
-        }
-        save(felt);
+        clearDealer(player);
     }
 
     private void returnHand(Table table, Player player, boolean notify, boolean refundChips) {
@@ -5031,17 +4795,20 @@ public final class TableManager implements Listener {
         for (UUID id : table.actives()) {
             data.actives.add(id.toString());
         }
-        data.piles = new ArrayList<>();
-        for (PotPile pile : table.getPiles()) {
-            PileData raw = toPileData(pile);
-            if (raw != null) {
-                data.piles.add(raw);
+        data.ledger = new ArrayList<>();
+        for (UUID owner : table.ledger().owners()) {
+            for (Stake stake : table.ledger().stakes(owner)) {
+                StakeData raw = toStakeData(table, owner, stake);
+                if (raw != null) {
+                    data.ledger.add(raw);
+                }
             }
         }
         data.ownerPlayer = table.ownerPlayer() != null ? table.ownerPlayer().toString() : null;
         data.ownerGuildId = table.ownerGuildId();
         data.autoDealer = table.autoDealer();
         data.staffMint = table.staffMint();
+        data.houseFloat = table.houseFloat();
         data.minBet = table.minBet();
         data.maxBet = table.maxBet();
         data.maxBoxes = table.maxBoxes();
@@ -5074,74 +4841,120 @@ public final class TableManager implements Listener {
                 }
             }
         }
-        if (data.piles != null) {
-            for (PileData raw : data.piles) {
-                PotPile pile = fromPileData(raw, table.street());
-                if (pile != null) {
-                    table.getPiles().add(pile);
-                }
+        if (data.ledger != null) {
+            for (StakeData raw : data.ledger) {
+                readStakeData(table, raw);
             }
         }
         applyHouseData(table, data);
         return table;
     }
 
-    private static PileData toPileData(PotPile pile) {
-        String item = encodeItem(pile.item());
-        if (item == null) {
+    /**
+     * Files written before the ledger stored the money in the piles themselves, with the tray
+     * decided by position. Read that once so no table loses value on the upgrade.
+     */
+    private void migrateLegacyPiles(Table table, TableData data) {
+        if (table == null || data == null || data.piles == null || data.piles.isEmpty()
+                || !table.ledger().isEmpty()) {
+            return;
+        }
+        int moved = 0;
+        for (PileData raw : data.piles) {
+            if (raw == null || raw.item == null || raw.count < 1 || raw.denars < 1) {
+                continue;
+            }
+            ItemStack item = decodeItem(raw.item);
+            if (item == null) {
+                continue;
+            }
+            item.setAmount(1);
+            UUID owner = null;
+            if (raw.owner != null) {
+                try {
+                    owner = UUID.fromString(raw.owner);
+                } catch (IllegalArgumentException ignored) {
+                    owner = null;
+                }
+            }
+            Location at = table.getOrigin().clone();
+            at.setX(raw.x);
+            at.setZ(raw.z);
+            // The tray used to be decided by where the pile sat.
+            UUID bucket = owner == null || inTrayZone(table, at) ? table.getId() : owner;
+            // Old piles each carried their own spot, so they keep it rather than being laid out again.
+            wager().restore(table, bucket, item, raw.typeKey, raw.denars, raw.count, raw.streetId,
+                    raw.x, raw.z, raw.x, raw.z);
+            moved += raw.denars * raw.count;
+        }
+        if (moved > 0) {
+            MoneyLog.note(table, moved, "read from old pile data into the ledger");
+        }
+    }
+
+    /** What the file on disk claims this table was holding, ledger entries and old piles alike. */
+    private static int storedDenars(TableData data) {
+        int sum = 0;
+        if (data == null) {
+            return 0;
+        }
+        if (data.ledger != null && !data.ledger.isEmpty()) {
+            for (StakeData stake : data.ledger) {
+                if (stake != null && stake.unit > 0 && stake.count > 0) {
+                    sum += stake.unit * stake.count;
+                }
+            }
+            return sum;
+        }
+        if (data.piles != null) {
+            for (PileData pile : data.piles) {
+                if (pile != null && pile.denars > 0 && pile.count > 0) {
+                    sum += pile.denars * pile.count;
+                }
+            }
+        }
+        return sum;
+    }
+
+    private static StakeData toStakeData(Table table, UUID owner, Stake stake) {
+        String item = encodeItem(stake.item());
+        if (item == null || stake.count() < 1) {
             return null;
         }
-        PileData data = new PileData();
-        data.owner = pile.ownerId() != null ? pile.ownerId().toString() : null;
+        StakeData data = new StakeData();
+        data.owner = owner.toString();
         data.item = item;
-        data.typeKey = pile.typeKey();
-        data.denars = pile.denars();
-        data.count = pile.count();
-        data.pieces = pile.pieces();
-        data.streetId = pile.streetId();
-        data.x = pile.x();
-        data.z = pile.z();
-        data.layerYaws = new ArrayList<>();
-        for (float yaw : pile.layerYaws()) {
-            data.layerYaws.add((double) yaw);
+        data.typeKey = stake.typeKey();
+        data.unit = stake.unit();
+        data.count = stake.count();
+        data.streetId = stake.streetId();
+        if (table.ledger().hasAnchor(owner)) {
+            data.anchorX = table.ledger().anchorX(owner);
+            data.anchorZ = table.ledger().anchorZ(owner);
+        }
+        if (stake.placed()) {
+            data.x = stake.x();
+            data.z = stake.z();
         }
         return data;
     }
 
-    private static PotPile fromPileData(PileData data, int tableStreet) {
-        if (data == null || data.item == null) {
-            return null;
+    private static void readStakeData(Table table, StakeData data) {
+        if (data == null || data.item == null || data.owner == null || data.unit < 1 || data.count < 1) {
+            return;
         }
-        int count = Math.max(0, data.count);
-        int pieces = data.pieces > 0 ? data.pieces : count;
-        if (count <= 0 && pieces <= 0) {
-            return null;
+        UUID owner;
+        try {
+            owner = UUID.fromString(data.owner);
+        } catch (IllegalArgumentException ignored) {
+            return;
         }
         ItemStack item = decodeItem(data.item);
         if (item == null) {
-            return null;
+            return;
         }
-        item.setAmount(1);
-        UUID owner = null;
-        if (data.owner != null) {
-            try {
-                owner = UUID.fromString(data.owner);
-            } catch (IllegalArgumentException ignored) {
-                owner = null;
-            }
-        }
-        String type = data.typeKey != null ? data.typeKey : ChipItems.typeKey(item);
-        PotPile pile = new PotPile(owner, item, type, data.denars, count, data.x, data.z);
-        pile.setPieces(pieces);
-        pile.setStreetId(data.streetId > 0 ? data.streetId : tableStreet);
-        if (data.layerYaws != null) {
-            for (Double yaw : data.layerYaws) {
-                if (yaw != null) {
-                    pile.layerYaws().add(yaw.floatValue());
-                }
-            }
-        }
-        return pile;
+        WagerEngine.get().restore(table, owner, item, data.typeKey, data.unit, data.count,
+                data.streetId, data.anchorX, data.anchorZ, data.x, data.z);
     }
 
     private static String encodeItem(ItemStack item) {
@@ -5231,11 +5044,14 @@ public final class TableManager implements Listener {
         List<String> discarded = new ArrayList<>();
         int street = 1;
         List<String> actives = new ArrayList<>();
+        List<StakeData> ledger = new ArrayList<>();
         List<PileData> piles = new ArrayList<>();
         String ownerPlayer;
         String ownerGuildId;
         Boolean autoDealer;
         Boolean staffMint;
+        /** Bank money still out on the felt. Absent on files written before profits were taxed. */
+        Integer houseFloat;
         int minBet;
         int maxBet;
         int maxBoxes;
@@ -5244,6 +5060,22 @@ public final class TableManager implements Listener {
         Integer bigBlind;
     }
 
+    /** One kind of coin held by one bucket. The money half of the old PileData. */
+    static final class StakeData {
+        String owner;
+        String item;
+        String typeKey;
+        int unit;
+        int count;
+        int streetId;
+        Double anchorX;
+        Double anchorZ;
+        /** Where this heap was put, when somebody chose the spot. Absent on older files. */
+        Double x;
+        Double z;
+    }
+
+    /** Only read now, to bring pre-ledger files forward. */
     static final class PileData {
         String owner;
         String item;

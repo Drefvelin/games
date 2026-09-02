@@ -1,5 +1,6 @@
 package net.tfminecraft.games.wager;
 
+import java.util.List;
 import java.util.OptionalInt;
 
 import org.bukkit.Bukkit;
@@ -56,6 +57,19 @@ public final class ChipItems {
         return itemOverride(stack) != null;
     }
 
+    /** Denars one of these is worth, or 0 when it is not money that can be staked. */
+    public static int unitDenars(ItemStack stack) {
+        if (stack == null) {
+            return 0;
+        }
+        DecoChips deco = decoChips(stack);
+        if (deco != null) {
+            return deco.denars();
+        }
+        OptionalInt whole = integerDenars(stack);
+        return whole.isPresent() ? whole.getAsInt() : 0;
+    }
+
     public static OptionalInt integerDenars(ItemStack stack) {
         if (stack == null || stack.getType() == Material.AIR) {
             return OptionalInt.empty();
@@ -80,6 +94,24 @@ public final class ChipItems {
             return wholeDenars(coin.getValue());
         }
         return OptionalInt.empty();
+    }
+
+    /**
+     * Smaller coins worth exactly as much as one of these, or empty when it cannot be broken.
+     *
+     * <p>A pouch of 100 is no use to somebody paying 50. Never breaks below a whole denar,
+     * because sub-denar silver cannot be staked.
+     */
+    public static List<ItemStack> change(ItemStack stack) {
+        if (stack == null || !denarEconomyPresent()) {
+            return List.of();
+        }
+        // Only real coins have change. Deco chips and wager.items are worth what they are.
+        if (coinOf(stack) == null || namedCoin(stack) != null || itemOverride(stack) != null) {
+            return List.of();
+        }
+        List<ItemStack> out = DenarEconomy.getMoneyManager().breakCoin(stack, 1.0);
+        return out == null ? List.of() : out;
     }
 
     public static String displayModel(ItemStack stack) {

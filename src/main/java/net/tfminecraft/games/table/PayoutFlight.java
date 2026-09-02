@@ -5,8 +5,8 @@ import java.util.UUID;
 import net.tfminecraft.games.wager.PotPile;
 
 /**
- * One pile flying to one dest. Null dest is void: despawn, never give.
- * Tray-stay flies onto the house tray and keeps the pile.
+ * One chip stack flying to one destination, for show only: the money it depicts already
+ * moved in the ledger, and the stack is thrown away when it lands.
  */
 public final class PayoutFlight {
 

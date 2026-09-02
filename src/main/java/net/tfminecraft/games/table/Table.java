@@ -13,6 +13,7 @@ import org.bukkit.Location;
 
 import net.tfminecraft.games.deck.Deck;
 import net.tfminecraft.games.wager.PotPile;
+import net.tfminecraft.games.wager.TableLedger;
 import net.tfminecraft.games.wager.WagerVote;
 
 /**
@@ -35,6 +36,7 @@ public final class Table {
     private UUID interactionId;
     private UUID labelId;
     private final List<PotPile> piles = new ArrayList<>();
+    private final TableLedger ledger = new TableLedger();
     private WagerVote vote;
     private int street = 1;
     private int payoutGen;
@@ -58,6 +60,7 @@ public final class Table {
     private String ownerGuildId;
     private boolean autoDealer;
     private boolean staffMint;
+    private int houseFloat;
     private int maxBoxes;
     private ShufflePolicy shufflePolicy = ShufflePolicy.SHOE;
     private int smallBlind;
@@ -173,6 +176,11 @@ public final class Table {
 
     public List<PotPile> getPiles() {
         return piles;
+    }
+
+    /** Every denar this table holds. Piles are only a drawing of it. */
+    public TableLedger ledger() {
+        return ledger;
     }
 
     public WagerVote getVote() {
@@ -372,6 +380,18 @@ public final class Table {
         if (staffMint) {
             this.autoDealer = true;
         }
+    }
+
+    /**
+     * Denars taken out of the guild bank that have not been paid back yet. Money coming back in
+     * settles this first, so only what a table earns beyond its own float counts as profit.
+     */
+    public int houseFloat() {
+        return houseFloat;
+    }
+
+    public void setHouseFloat(int houseFloat) {
+        this.houseFloat = Math.max(0, houseFloat);
     }
 
     public int maxBoxes() {
