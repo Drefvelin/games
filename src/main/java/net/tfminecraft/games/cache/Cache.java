@@ -75,7 +75,7 @@ public final class Cache {
     public static int wagerPlaceSeconds = 10;
     public static int wagerPayoutTicks = 10;
     public static int wagerMinPlayers = 1;
-    public static boolean wagerAuditLog = true;
+    public static boolean wagerAuditLog = false;
     public static boolean wagerShowChips = true;
     public static WagerItemOverride wagerGold;
     public static WagerItemOverride wagerSilver;

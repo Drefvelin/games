@@ -102,7 +102,7 @@ wager:
   # Loot /wager <n>: 1 auto-accepts if nobody else has bought in.
   min-players: 1
   # Log every denar movement (bank, tray, felt, player) to the console.
-  audit-log: true
+  audit-log: false
   # Draw chips on the felt. Money lives in the table ledger either way.
   show-chips: true
   gold:
