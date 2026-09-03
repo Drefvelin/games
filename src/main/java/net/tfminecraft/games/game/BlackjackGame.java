@@ -34,9 +34,9 @@ import net.tfminecraft.games.table.TableManager;
 import net.tfminecraft.games.voice.RpNames;
 import net.tfminecraft.games.voice.RpVoice;
 import net.tfminecraft.games.wager.Accounts;
-import net.tfminecraft.games.wager.MoneyAccount;
 import net.tfminecraft.games.wager.MoneyLog;
 import net.tfminecraft.games.wager.MoneyTx;
+import net.tfminecraft.games.wager.PayWinResult;
 import net.tfminecraft.games.wager.TxResult;
 import net.tfminecraft.games.wager.WagerEngine;
 
@@ -1409,40 +1409,17 @@ public final class BlackjackGame implements Game {
             UUID owner = entry.getKey();
             int amount = entry.getValue();
             Player winner = Bukkit.getPlayer(owner);
-            // One movement: the tray pays what it can make, and whoever backs the table covers
-            // the rest directly. Nothing sits half paid waiting for a second step to work.
-            int fromTray = Math.min(amount, WagerEngine.get().tray(table));
-            fromTray = Accounts.tray(table).largestTakeUpTo(fromTray, null);
-            MoneyTx tx = WagerEngine.get().begin(table, "win payout").animate(flights);
-            MoneyAccount to = Accounts.payee(table, winner, owner);
-            tx.moveUpTo(Accounts.tray(table), to, amount);
-            int rest = amount - fromTray;
-            if (rest > 0) {
-                if (dealerBacked) {
-                    if (dealer != null && dealer.isOnline()) {
-                        tx.moveUpTo(Accounts.pockets(table, dealer), to, rest);
-                    }
-                } else {
-                    // The round reserve is sized to make this unreachable, so say so if it happens.
-                    if (Cache.wagerAuditLog) {
-                        MoneyLog.mismatch(table, "tray short " + rest + " paying " + owner
-                                + ", the round reserve should have covered it");
-                    }
-                    ItemStack template = templates.get(owner);
-                    if (template == null) {
-                        template = houseTemplate(table, owner);
-                    }
-                    tx.moveUpTo(Accounts.house(table), to, rest, template);
-                }
+            ItemStack template = templates.get(owner);
+            if (template == null) {
+                template = houseTemplate(table, owner);
             }
-            int paid = tx.commit().moved();
-            // Only the tray's share came off this table. The rest was never table money.
-            wentOut += Math.min(paid, fromTray);
-            int owe = amount - paid;
-            if (owe > 0) {
+            PayWinResult result = WagerEngine.get().payWin(table, winner, owner, amount, dealer,
+                    dealerBacked, template, flights);
+            wentOut += result.trayMoved();
+            if (result.owe() > 0) {
                 Player tell = dealerBacked ? dealer : winner;
                 if (tell != null && tell.isOnline()) {
-                    tell.sendMessage(Messages.get("bet.owe", "amount", String.valueOf(owe)));
+                    tell.sendMessage(Messages.get("bet.owe", "amount", String.valueOf(result.owe())));
                 }
             }
         }

@@ -13,6 +13,7 @@ import org.bukkit.Location;
 
 import net.tfminecraft.games.deck.Deck;
 import net.tfminecraft.games.wager.PotPile;
+import net.tfminecraft.games.wager.RoundMoney;
 import net.tfminecraft.games.wager.TableLedger;
 import net.tfminecraft.games.wager.WagerVote;
 
@@ -37,6 +38,7 @@ public final class Table {
     private UUID labelId;
     private final List<PotPile> piles = new ArrayList<>();
     private final TableLedger ledger = new TableLedger();
+    private final RoundMoney roundMoney = new RoundMoney();
     private WagerVote vote;
     private int street = 1;
     private int payoutGen;
@@ -181,6 +183,10 @@ public final class Table {
     /** Every denar this table holds. Piles are only a drawing of it. */
     public TableLedger ledger() {
         return ledger;
+    }
+
+    public RoundMoney roundMoney() {
+        return roundMoney;
     }
 
     public WagerVote getVote() {
@@ -443,5 +449,6 @@ public final class Table {
         boxIndex = 0;
         handIndex = 0;
         autoCountdown = 0;
+        roundMoney.clear();
     }
 }

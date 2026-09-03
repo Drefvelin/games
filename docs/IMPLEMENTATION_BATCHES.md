@@ -327,6 +327,45 @@ New set. Lock: [GUILD_TABLES.md](GUILD_TABLES.md). Phase 2 blackjack stay done. 
 
 ---
 
+## Player winnings tax
+
+Citizen tax on net **coin** profit per round. Loot and `wager.items` are never taxed. Guild `GAMBLING` tax on house profit stays separate. Lock: [GUILD_TABLES.md](GUILD_TABLES.md) (player vs house), [WAGER_ENGINE.md](WAGER_ENGINE.md) (`taxSink`).
+
+### Batch 1 - Money profit helper + tax sink
+
+- [x] `ChipItems.moneyValue(Stake)` / `moneyValue(Collection)`: `isMoneyCoin` only; type-key fallback for tests (`gold`, `silver`, `coin:`)
+- [x] `TaxSink` + `Accounts.taxSink()`: accepts chips and destroys them; audit label `citizen tax`
+- [x] `CitizenTax.due(Player, moneyProfit)` via `MoneyManager.doTaxes`; `tell` uses DE `money.tax` (`%tax% in tax`)
+- [x] Unit tests: `ChipItemsMoneyValueTest`, `CitizenTaxTest` (`chipsDue` rounding)
+
+**Test:** `mvn test` in `games`. Coin stake 50 + loot stake 0 taxable. `chipsDue(100, 10)` → 10.
+
+### Batch 2 - Round money in / out
+
+- [x] Per-owner `moneyIn` / `moneyOut` on `Table` (`RoundMoney`); updated in `MoneyTx.apply`
+- [x] Clear on `endSession` / idle reset (`clearSession`)
+
+**Test:** Place 20, refund 20 → net 0. Place 20, pay 40 → profit 20. Loot stake unchanged on money maps.
+
+### Batch 3 - Withhold on payout (blackjack)
+
+- [x] Tax `pay` map entries: `CitizenTax.levy` + `WagerEngine.payWin` spreads net to payee and tax to `taxSink`; box refund untaxed
+
+**Test:** 10% tax, 100 bet, even-money win: 190 coins + `(10 in tax)` line; push untaxed.
+
+### Batch 4 - Hold'em and Five-Draw
+
+- [x] Withhold during `payFromPot` on coin profit only; loot paid in full
+- [x] `sweepPot` taxes coin via `coinPot` + spreads, then sweeps loot remainder
+
+**Test:** 40 in, 100 pot, 10% tax → 94 coins + tax line; loot item intact.
+
+### Batch 5 - Docs and matrix
+
+- [ ] `GUILD_TABLES.md`, `TEST_MATRIX.md` player-tax cases
+
+---
+
 ## Later
 
 | Scope |

@@ -99,6 +99,20 @@ public final class WagerEngine {
         return out;
     }
 
+    /** Coin denars in the pot, excluding loot stakes. */
+    public int coinPot(Table table) {
+        if (table == null) {
+            return 0;
+        }
+        int sum = 0;
+        for (UUID owner : potOwners(table)) {
+            for (Stake stake : table.ledger().stakes(owner)) {
+                sum += ChipItems.moneyValue(stake);
+            }
+        }
+        return sum;
+    }
+
     /**
      * The smallest coin a bucket holds, so anything the house has to create is as divisible as
      * the money already on the table.
@@ -124,18 +138,30 @@ public final class WagerEngine {
     // ---------------------------------------------------------------- sweeping
 
     /**
-     * The whole pot to one place, as one movement. For a hand that ends without a showdown, or
-     * one there is nobody left to play for.
+     * The whole pot to one place. Coin profit is taxed to the sink; loot and any leftover stakes
+     * are swept after the coin spreads.
      */
-    public TxResult sweepPot(Table table, Player dest, List<PayoutFlight> flights, String reason) {
+    public TxResult sweepPot(Table table, Player dest, UUID winner, List<PayoutFlight> flights,
+            String reason) {
         if (table == null) {
             return TxResult.nothing();
         }
-        MoneyTx tx = begin(table, reason).animate(flights);
-        for (UUID owner : potOwners(table)) {
-            tx.moveAll(Accounts.bucket(table, owner), Accounts.payee(table, dest, owner));
+        int coinTotal = coinPot(table);
+        int moved = 0;
+        if (coinTotal > 0 && winner != null) {
+            moved += payPotCoins(table, dest, winner, coinTotal, flights, reason).moved();
         }
-        return tx.commit();
+        List<UUID> owners = potOwners(table);
+        if (owners.isEmpty()) {
+            return moved > 0 ? TxResult.done(moved, flights) : TxResult.nothing();
+        }
+        MoneyTx tx = begin(table, reason).animate(flights);
+        MoneyAccount payee = Accounts.payee(table, dest, winner);
+        for (UUID owner : owners) {
+            tx.moveAll(Accounts.bucket(table, owner), payee);
+        }
+        TxResult swept = tx.commit();
+        return TxResult.done(moved + swept.moved(), flights);
     }
 
     /** Every stake back to whoever put it there, as one movement. */
@@ -216,14 +242,96 @@ public final class WagerEngine {
     }
 
     /** Pay a share of the pot, drawing from the buckets that built it so the chips fly from there. */
-    public TxResult payFromPot(Table table, Player dest, int denars, List<PayoutFlight> flights,
-            String reason) {
-        if (table == null || denars < 1) {
+    public TxResult payFromPot(Table table, Player dest, UUID owner, int denars,
+            List<PayoutFlight> flights, String reason) {
+        if (table == null || denars < 1 || owner == null) {
             return TxResult.nothing();
         }
-        return begin(table, reason).animate(flights)
-                .spread(Accounts.payee(table, dest, null), denars, potAccounts(table))
-                .commit();
+        return payPotCoins(table, dest, owner, denars, flights, reason);
+    }
+
+    /**
+     * Spread coin denars from the pot to a winner, withholding citizen tax on profit only. Loot
+     * is not involved; callers sweep buckets separately when needed.
+     */
+    private TxResult payPotCoins(Table table, Player dest, UUID owner, int denars,
+            List<PayoutFlight> flights, String reason) {
+        int profit = table.roundMoney().taxableProfit(owner, denars);
+        CitizenTax.Levy levy = CitizenTax.levy(dest, profit);
+        int net = denars - levy.chips();
+        MoneyAccount payee = Accounts.payee(table, dest, owner);
+        List<MoneyAccount> sources = potAccounts(table);
+
+        int moved = 0;
+        if (net > 0) {
+            moved += begin(table, reason).animate(flights)
+                    .spread(payee, net, sources)
+                    .commit()
+                    .moved();
+        }
+        if (levy.chips() > 0) {
+            int taxMoved = begin(table, "citizen tax").animate(flights)
+                    .spread(Accounts.taxSink(), levy.chips(), sources)
+                    .commit()
+                    .moved();
+            if (taxMoved > 0) {
+                CitizenTax.tell(dest, levy.tax());
+            }
+            moved += taxMoved;
+        }
+        return moved > 0 ? TxResult.done(moved, flights) : TxResult.nothing();
+    }
+
+    /**
+     * Pay blackjack win profit to a player, withholding citizen tax to the sink first. Tray pays
+     * before whoever backs the table; tax chips are destroyed rather than banked.
+     */
+    public PayWinResult payWin(Table table, Player winner, UUID owner, int profit, Player dealer,
+            boolean dealerBacked, ItemStack template, List<PayoutFlight> flights) {
+        if (table == null || profit < 1) {
+            return PayWinResult.NONE;
+        }
+        CitizenTax.Levy levy = CitizenTax.levy(winner, profit);
+        int net = profit - levy.chips();
+        MoneyAccount payee = Accounts.payee(table, winner, owner);
+        List<MoneyAccount> sources = winSources(table, dealer, dealerBacked);
+
+        int trayBefore = tray(table);
+        int paidNet = 0;
+        if (net > 0) {
+            paidNet = begin(table, "win payout").animate(flights)
+                    .spread(payee, net, sources, template)
+                    .commit()
+                    .moved();
+        }
+        int trayMoved = trayBefore - tray(table);
+
+        int paidTax = 0;
+        if (levy.chips() > 0) {
+            int trayBeforeTax = tray(table);
+            paidTax = begin(table, "citizen tax").animate(flights)
+                    .spread(Accounts.taxSink(), levy.chips(), sources, template)
+                    .commit()
+                    .moved();
+            if (paidTax > 0) {
+                CitizenTax.tell(winner, levy.tax());
+            }
+            trayMoved += trayBeforeTax - tray(table);
+        }
+
+        int moved = paidNet + paidTax;
+        return new PayWinResult(moved, trayMoved, Math.max(0, profit - moved));
+    }
+
+    private static List<MoneyAccount> winSources(Table table, Player dealer, boolean dealerBacked) {
+        List<MoneyAccount> sources = new ArrayList<>();
+        sources.add(Accounts.tray(table));
+        if (dealerBacked && dealer != null && dealer.isOnline()) {
+            sources.add(Accounts.pockets(table, dealer));
+        } else if (!dealerBacked) {
+            sources.add(Accounts.house(table));
+        }
+        return sources;
     }
 
     /** One player's bet on the current street back to them, leaving earlier streets in the pot. */

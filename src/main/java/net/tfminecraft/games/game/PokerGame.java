@@ -329,7 +329,7 @@ public final class PokerGame implements Game {
         }
         if (rest != null) {
             // Nobody left to play for it, so the pot goes to the last seat.
-            WagerEngine.get().sweepPot(table, Bukkit.getPlayer(rest), flights, "hand abandoned");
+            WagerEngine.get().sweepPot(table, Bukkit.getPlayer(rest), rest, flights, "hand abandoned");
         }
         boolean stop = live && table.actives().size() < 2;
         manager.flushPiles(table, flights, () -> {
@@ -625,7 +625,7 @@ public final class PokerGame implements Game {
         }
         // Whatever the levels could not split in whole coins goes to one seat.
         if (leftover != null) {
-            WagerEngine.get().sweepPot(table, Bukkit.getPlayer(leftover), flights, "pot remainder");
+            WagerEngine.get().sweepPot(table, Bukkit.getPlayer(leftover), leftover, flights, "pot remainder");
         }
         UUID tableId = table.getId();
         manager.flushPiles(table, flights, () -> {
@@ -679,7 +679,7 @@ public final class PokerGame implements Game {
             if (need < 1) {
                 continue;
             }
-            WagerEngine.get().payFromPot(table, Bukkit.getPlayer(winner), need, flights, "pot");
+            WagerEngine.get().payFromPot(table, Bukkit.getPlayer(winner), winner, need, flights, "pot");
         }
     }
 
@@ -807,7 +807,7 @@ public final class PokerGame implements Game {
         List<PayoutFlight> flights = new ArrayList<>();
         Player dest = winner != null ? Bukkit.getPlayer(winner) : null;
         if (dest != null) {
-            WagerEngine.get().sweepPot(table, dest, flights, "fold win");
+            WagerEngine.get().sweepPot(table, dest, winner, flights, "fold win");
         } else {
             // With nobody left to win it, every stake goes back where it came from.
             WagerEngine.get().returnStakes(table, flights, "hand abandoned");

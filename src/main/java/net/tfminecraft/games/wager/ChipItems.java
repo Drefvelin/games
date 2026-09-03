@@ -1,5 +1,6 @@
 package net.tfminecraft.games.wager;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.OptionalInt;
 
@@ -45,6 +46,44 @@ public final class ChipItems {
             return false;
         }
         return namedCoin(stack) != null || coinOf(stack) != null;
+    }
+
+    /**
+     * Denars in this stake that count as money for citizen tax. Loot and {@code wager.items}
+     * are worth 0 here even when they have a declared value on the felt.
+     */
+    public static int moneyValue(Stake stake) {
+        if (stake == null || stake.count() < 1) {
+            return 0;
+        }
+        ItemStack item = stake.item();
+        if (item != null) {
+            return isMoneyCoin(item) ? stake.value() : 0;
+        }
+        return moneyValueFromTypeKey(stake.typeKey(), stake.unit(), stake.count());
+    }
+
+    /** Sum of {@link #moneyValue(Stake)} over a collection. */
+    public static int moneyValue(Collection<Stake> stakes) {
+        if (stakes == null || stakes.isEmpty()) {
+            return 0;
+        }
+        int sum = 0;
+        for (Stake stake : stakes) {
+            sum += moneyValue(stake);
+        }
+        return sum;
+    }
+
+    /** For tests and saved stakes with no item stack: gold, silver, and coin: keys only. */
+    private static int moneyValueFromTypeKey(String typeKey, int unit, int count) {
+        if (typeKey == null || unit < 1 || count < 1) {
+            return 0;
+        }
+        if ("gold".equals(typeKey) || "silver".equals(typeKey) || typeKey.startsWith("coin:")) {
+            return unit * count;
+        }
+        return 0;
     }
 
     public static boolean needsDeclaredValue(ItemStack stack) {

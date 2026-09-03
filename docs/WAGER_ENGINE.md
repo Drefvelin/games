@@ -14,8 +14,9 @@ A `MoneyAccount` is a place money can sit. All of them answer the same questions
 | `BucketAccount` | One owner's stakes in the `TableLedger` | The tray is the bucket keyed by the table's own id |
 | `BankAccount` | The owning guild bank | The only class in games that reaches SimpleFactions money, via the package-private `GuildBank` |
 | `MintAccount` | Nothing, creates money | Refuses on anything but a staff-mint table |
+| `TaxSink` | Nothing, destroys chips | Withheld citizen tax on coin winnings. Not on the felt |
 
-Build them through `Accounts`: `bucket`, `tray`, `pockets`, `coins`, `declared`, `payee`, `ground`, `bank`, `mint`, and `house`, which picks mint or bank depending on the table.
+Build them through `Accounts`: `bucket`, `tray`, `pockets`, `coins`, `declared`, `payee`, `ground`, `bank`, `mint`, `taxSink`, and `house`, which picks mint or bank depending on the table.
 
 ## A transaction
 
@@ -62,6 +63,14 @@ Nothing is moved for tax. Winnings are already in the bank the moment `settleAut
 A six-box table at 1000 reserves 48000. If players net lose 1500 the tray banks 49500, the float is cleared and 1500 is declared. If players net win 2000 only 46000 comes back, the float stays 2000, nothing is declared, and the table's next 2000 of winnings is sheltered until it is level again. So a losing streak carries forward by itself, and a bank covering a winner directly leaves the float raised for the same reason: the house is down until it earns that back.
 
 `houseFloat` lives on `Table` and is saved with it, because every commit ends in `WagerHost.moneyMoved`. It is zeroed if a table changes owning guild, since a float belongs to whoever put it up. Staff mint tables never reach `BankAccount` at all, so they declare nothing, and a private table with a human dealer returns its float to the dealer rather than a bank and is likewise untaxed.
+
+## Player coin profit this round
+
+`RoundMoney` on each `Table` tracks coin `moneyIn` and `moneyOut` per player for the current session. `MoneyTx` updates it on every successful leg: pockets to the felt raise `moneyIn`, any payout to a `PlayerAccount` raises `moneyOut` (tray, bank, pot, or a dealer covering from pockets). Loot stakes are ignored via `ChipItems.moneyValue`. `moneyProfit` is `max(0, moneyOut - moneyIn)`. Maps are cleared in `clearSession` (end of hand, idle reset) and are not saved with the table file.
+
+Blackjack settle calls `WagerEngine.payWin`, which withholds citizen tax on the `pay` map profit to `TaxSink` before the net reaches the player, and sends DenarEconomy's `money.tax` line.
+
+Hold'em and Five-Draw pot payouts include the winner's own stake. `RoundMoney.taxableProfit(owner, payout)` subtracts stake still returning (`moneyIn - moneyOut`) before tax applies. `WagerEngine.payFromPot` and `sweepPot` spread net coins to the payee and tax to `TaxSink` from `potAccounts` in two commits, then `sweepPot` `moveAll`s loot and any leftover stakes untaxed. `returnStakes` stays untaxed. `coinPot` sums coin denars across pot buckets for sweep tax math.
 
 ## Coin selection is exact, not greedy
 
