@@ -1423,6 +1423,7 @@ public final class BlackjackGame implements Game {
                 }
             }
         }
+        WagerEngine.get().announceWins(table, "blackjack");
         // Pushes and anything a winner still has on the felt goes straight back to them.
         for (UUID owner : new ArrayList<>(manager.boxOwners(table))) {
             Player back = Bukkit.getPlayer(owner);

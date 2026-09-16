@@ -627,6 +627,7 @@ public final class PokerGame implements Game {
         if (leftover != null) {
             WagerEngine.get().sweepPot(table, Bukkit.getPlayer(leftover), leftover, flights, "pot remainder");
         }
+        WagerEngine.get().announceWins(table, "poker");
         UUID tableId = table.getId();
         manager.flushPiles(table, flights, () -> {
             Table still = TableManager.get().table(tableId);
@@ -812,6 +813,7 @@ public final class PokerGame implements Game {
             // With nobody left to win it, every stake goes back where it came from.
             WagerEngine.get().returnStakes(table, flights, "hand abandoned");
         }
+        WagerEngine.get().announceWins(table, "poker");
         UUID tableId = table.getId();
         manager.flushPiles(table, flights, () -> {
             Table still = TableManager.get().table(tableId);

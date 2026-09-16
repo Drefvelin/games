@@ -5,10 +5,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 
+import net.tfminecraft.games.events.PlayerWonMoneyEvent;
 import net.tfminecraft.games.table.PayoutFlight;
 import net.tfminecraft.games.table.Table;
 
@@ -257,6 +259,7 @@ public final class WagerEngine {
     private TxResult payPotCoins(Table table, Player dest, UUID owner, int denars,
             List<PayoutFlight> flights, String reason) {
         int profit = table.roundMoney().taxableProfit(owner, denars);
+        table.roundMoney().recordProfit(owner, profit);
         CitizenTax.Levy levy = CitizenTax.levy(dest, profit);
         int net = denars - levy.chips();
         MoneyAccount payee = Accounts.payee(table, dest, owner);
@@ -291,6 +294,7 @@ public final class WagerEngine {
         if (table == null || profit < 1) {
             return PayWinResult.NONE;
         }
+        table.roundMoney().recordProfit(owner, profit);
         CitizenTax.Levy levy = CitizenTax.levy(winner, profit);
         int net = profit - levy.chips();
         MoneyAccount payee = Accounts.payee(table, winner, owner);
@@ -321,6 +325,24 @@ public final class WagerEngine {
 
         int moved = paidNet + paidTax;
         return new PayWinResult(moved, trayMoved, Math.max(0, profit - moved));
+    }
+
+    /**
+     * One {@link PlayerWonMoneyEvent} per player who is up on this settled round, pre-tax. Call
+     * once at the end of a settlement; offline winners are skipped.
+     */
+    public void announceWins(Table table, String game) {
+        if (table == null) {
+            return;
+        }
+        for (Map.Entry<UUID, Integer> entry : table.roundMoney().wonProfit().entrySet()) {
+            Player player = Bukkit.getPlayer(entry.getKey());
+            if (player == null || entry.getValue() < 1) {
+                continue;
+            }
+            Bukkit.getPluginManager().callEvent(
+                    new PlayerWonMoneyEvent(player, entry.getValue(), game));
+        }
     }
 
     private static List<MoneyAccount> winSources(Table table, Player dealer, boolean dealerBacked) {
