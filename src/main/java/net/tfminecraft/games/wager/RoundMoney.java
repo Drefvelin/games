@@ -13,6 +13,7 @@ public final class RoundMoney {
 
     private final Map<UUID, Integer> moneyIn = new HashMap<>();
     private final Map<UUID, Integer> moneyOut = new HashMap<>();
+    private final Map<UUID, Integer> wonProfit = new HashMap<>();
 
     /** Record one successful leg from {@link MoneyTx}. */
     public void recordLeg(MoneyAccount from, MoneyAccount to, List<Stake> coins) {
@@ -65,8 +66,22 @@ public final class RoundMoney {
         return Math.max(0, payout - stakeBack);
     }
 
+    /** Remember a pre-tax profit payout so the round can be announced once at the end. */
+    public void recordProfit(UUID owner, int profit) {
+        if (owner == null || profit < 1) {
+            return;
+        }
+        wonProfit.merge(owner, profit, Integer::sum);
+    }
+
+    /** Pre-tax coin profit per player so far this round, the same figure citizen tax is taken on. */
+    public Map<UUID, Integer> wonProfit() {
+        return Map.copyOf(wonProfit);
+    }
+
     public void clear() {
         moneyIn.clear();
         moneyOut.clear();
+        wonProfit.clear();
     }
 }
