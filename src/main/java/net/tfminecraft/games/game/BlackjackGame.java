@@ -93,17 +93,14 @@ public final class BlackjackGame implements Game {
         if (table.live()) {
             return true;
         }
-        if (!inStandRange(table, player)) {
-            if (table.dealerId() == null && !auto(table)) {
-                player.sendMessage(Messages.get("dealer.none"));
-            }
-            return true;
-        }
-        if (auto(table) && table.staffMint()) {
-            player.sendMessage(Messages.get("dealer.staff_table"));
-            return true;
-        }
         if (auto(table)) {
+            if (!inStandRange(table, player)) {
+                return true;
+            }
+            if (table.staffMint()) {
+                player.sendMessage(Messages.get("dealer.staff_table"));
+                return true;
+            }
             if (!GuildTables.mayDeal(table, player)) {
                 player.sendMessage(Messages.get("dealer.denied"));
                 return true;
